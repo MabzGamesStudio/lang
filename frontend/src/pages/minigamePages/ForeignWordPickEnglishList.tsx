@@ -72,7 +72,6 @@ export default function ForeignWordPickEnglishList() {
         if (i === correctIndex) {
             setTimeout(() => {
                 setSelected(null);
-                console.log("here");
                 loadNewQuestion();
             }, 500);
         } else {
