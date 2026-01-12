@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Menu from "./pages/Menu";
 import Minigames from "./pages/Minigames";
 import ForeignWordPickEnglishList from "./pages/minigamePages/ForeignWordPickEnglishList";
+import EnglishWordPickForeignList from "./pages/minigamePages/EnglishWordPickForeignList";
 
 function App() {
     return (
@@ -10,6 +11,7 @@ function App() {
                 <Route path="/" element={<Menu />} />
                 <Route path="/minigames" element={<Minigames />} />
                 <Route path="/minigames/foreignWordPickEnglishList" element={<ForeignWordPickEnglishList />} />
+                <Route path="/minigames/englishWordPickForeignList" element={<EnglishWordPickForeignList />} />
                 <Route path="*" element={<NotFoundPage />} />
             </Routes>
         </BrowserRouter>

@@ -11,9 +11,10 @@ export function createServer() {
         res.json({ message: "Hello from backend 👋" });
     });
 
-    app.get("/api/:language/myEndpoint", (req, res) => {
+    app.get("/api/:language/wordList", (req, res) => {
         const { language } = req.params;
         const groupSubset = parseInt(req.query.groupSubset);
+        const items = parseInt(req.query.items);
 
         // Validate that groupSubset is a number
         if (isNaN(groupSubset)) {
@@ -26,11 +27,11 @@ export function createServer() {
                 WHERE language = ? 
                 AND frequency_group_rank <= ? 
                 ORDER BY RANDOM() 
-                LIMIT 4
+                LIMIT ?
             `);
 
             // 2. Execute it synchronously
-            const rows = stmt.all(language, groupSubset);
+            const rows = stmt.all(language, groupSubset, items);
 
             // 3. Send the response
             res.json(rows);

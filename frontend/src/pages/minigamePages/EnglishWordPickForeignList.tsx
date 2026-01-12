@@ -26,7 +26,7 @@ async function getQuestion(n: number, items: number = 4) {
     }
 }
 
-export default function ForeignWordPickEnglishList() {
+export default function EnglishWordPickForeignList() {
     // 1. New State Structure
     const [history, setHistory] = useState([]); // Array of question objects
     const [pointer, setPointer] = useState(-1);  // Index of the visible question
