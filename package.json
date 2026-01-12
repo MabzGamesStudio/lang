@@ -1,0 +1,23 @@
+{
+  "name": "lang",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "electron/main.js",
+  "scripts": {
+    "backend": "electron . --headless",
+    "start": "cd frontend && npm run build && cd .. && electron .",
+    "electron": "electron .",
+    "package": "electron-packager . Lang --platform=darwin --overwrite"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.6.0",
+    "cors": "^2.8.5",
+    "electron": "^39.2.7",
+    "electron-rebuild": "^3.2.9",
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.0.2"
+  }
+}

@@ -1,0 +1,79 @@
+.page {
+    padding: 2rem;
+}
+
+.page-title {
+    max-width: 1200px;
+    margin: 0 auto 1.5rem;
+}
+
+.games-grid {
+    max-width: 1200px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 1.5rem;
+}
+
+.game-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+
+    &:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+    }
+
+    img {
+        width: 100%;
+        aspect-ratio: 1 / 1; // ✅ forces square cards
+        object-fit: cover;
+        display: block;
+    }
+
+    h2 {
+        margin: 0;
+        padding: 0.75rem 1rem;
+        font-size: 1rem;
+        text-align: center;
+    }
+}
+
+.game-image {
+    position: relative;
+    overflow: hidden;
+
+    img {
+        width: 100%;
+        aspect-ratio: 1 / 1;
+        object-fit: cover;
+        filter: blur(6px);
+        transform: scale(1.05); // prevents blur edge cutoff
+    }
+}
+
+.game-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    background: rgba(0, 0, 0, 0.25);
+}
+
+.icon {
+    width: 32px;
+    height: 32px;
+    fill: transparent;
+    opacity: 0.9;
+}
+
+.arrow {
+    width: 28px;
+    height: 28px;
+}

@@ -1,0 +1,87 @@
+.page {
+    min-height: 100vh;
+    padding: 2rem;
+    background: var(--bg);
+}
+
+.page-title {
+    text-align: center;
+    font-size: 2rem;
+    margin-bottom: 1rem;
+}
+
+.card {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 2rem;
+    background: var(--surface);
+    border-radius: 12px;
+    border: 1px solid var(--border);
+}
+
+.input-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 1rem;
+    font-size: 1.2rem;
+}
+
+.input-row input[type="number"] {
+    width: 80px;
+    padding: 0.5rem;
+    font-size: 1rem;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    margin: 0; // remove auto centering
+}
+
+.question {
+    font-size: 3rem;
+    background: var(--surface);
+    padding: 1.5rem;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    text-align: center;
+    margin: 2rem 0;
+}
+
+.answers {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+}
+
+.answer {
+    padding: 1rem;
+    font-size: 2rem;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.answer.correct {
+    background: #22c55e;
+    color: white;
+}
+
+.answer.wrong {
+    background: #ef4444;
+    color: white;
+}
+
+.nav-arrows {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 1.2rem;
+    margin: 1rem 0;
+}
+
+.nav-arrows button {
+    padding: 0.5rem 1rem;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    cursor: pointer;
+}

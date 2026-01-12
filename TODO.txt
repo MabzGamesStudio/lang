@@ -1,0 +1,39 @@
+- Learning phases:
+    1 Recognition: foreign word, English word, image, listened foreign word, listened English word
+    2 Recall: foreign word, English word, image, listened foreign word, listened English word
+    3 Recite: Rewrite foreign sentence string from memory, write foreign sentence from listened sentence
+    4 Translation: Translate foreign sentence string to English, translate English sentence string to foreign language, translate foreign sentence listened to English, translate English sentence listened to foreign language
+- Repetition with increasing delays
+    - Through a session
+    - Across sessions
+- Chunk learning into groups of 7 words
+- Immediate feedback
+- Train in the range that is medium, not too easy, not too hard
+    - Have a user adjustable temperature for if they want to make it harder or easier
+    - Have a user data based computed difficulty estimate
+
+- Minigames
+    - Given foreign word, choose from list of English translations
+    - Given English word, choose from list of foreign translations
+    - Given image, choose from list of foreign translations
+    - Listen to foreign word, choose from list of foreign words
+    - Listen to foreign word, choose from list of English words
+    - Listen to English word, choose from list of foreign words
+
+    - Given foreign word, type the English translation
+    - Given English word, type the foreign translation
+    - Given image, type the foreign translation
+    - Listen to foreign word, type the foreign word
+    - Listen to foreign word, type the English word
+    - Listen to English word, type the foreign word
+
+    - Given foreign sentence, type the foreign sentence
+    - Listen to foreign sentence, type the foreign sentence
+
+    - Given foreign sentence, type the English sentence
+    - Given English sentence, type the foreign sentence
+    - Listen to foreign sentence, type the English sentence
+    - Listen to English sentence, type the foreign sentence
+
+LLM prompts:
+- Respond with a single sentence in <language> only allowing these words: [<randomize list of words for variety>]
