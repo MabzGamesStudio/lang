@@ -1,3 +1,6 @@
+$correct-color: #4caf50;
+$wrong-color: #f44336;
+
 .page {
     min-height: 100vh;
     padding: 2rem;
@@ -62,13 +65,88 @@
 }
 
 .answer.correct {
-    background: #22c55e;
+    background: $correct-color;
     color: white;
 }
 
 .answer.wrong {
-    background: #ef4444;
+    background: $wrong-color;
     color: white;
+}
+
+.answer-container {
+    max-width: 500px;
+    margin: 2rem auto;
+
+    .answer-input {
+        width: 100%;
+        padding: 12px 20px;
+        font-size: 3rem;
+        border: 2px solid #ddd;
+        border-radius: 8px;
+        transition: all 0.3s ease;
+        outline: none;
+
+        &:focus {
+            border-color: #ddd;
+            box-shadow: 0 0 8px rgba(100, 108, 255, 0.2);
+        }
+
+        &.correct {
+            animation: flash-green 0.3s ease-out forwards;
+            background-color: $correct-color;
+        }
+
+        &.wrong {
+            animation: flash-red 0.3s ease-out forwards;
+            background-color: $wrong-color;
+        }
+    }
+}
+
+.feedback-area {
+    height: 50px;
+    margin-top: 2rem;
+    justify-content: center;
+    align-items: center;
+    display: flex;
+    font-size: 3em;
+
+    .msg {
+        color: #ddd;
+    }
+}
+
+@keyframes flash-green {
+    0% {
+        background-color: #ddd;
+    }
+
+    50% {
+        color: #ddd;
+        background-color: ($correct-color);
+    }
+
+    100% {
+        color: #ddd;
+        background-color: ($correct-color);
+    }
+}
+
+@keyframes flash-red {
+    0% {
+        background-color: #ddd;
+    }
+
+    50% {
+        color: #ddd;
+        background-color: ($wrong-color);
+    }
+
+    100% {
+        color: #ddd;
+        background-color: ($wrong-color);
+    }
 }
 
 .nav-arrows {
