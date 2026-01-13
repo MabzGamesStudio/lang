@@ -11,6 +11,49 @@
 - Train in the range that is medium, not too easy, not too hard
     - Have a user adjustable temperature for if they want to make it harder or easier
     - Have a user data based computed difficulty estimate
+- Word mastery categories
+    - 0: Not encountered
+    - 1: Bad recognition
+    - 2: Good recognition
+    ---------------------------------
+    - 0: Not encountered
+    - 1: Bad recall
+    - 2: Okay recall
+    - 3: Good recall
+    ---------------------------------
+    - 0: Not encountered
+    - 1: Bad sentence integration
+    - 2: Good sentence integration
+    ---------------------------------
+    - 0: Not encountered
+    - 1: Bad translation integration
+    - 2: Okay translation integration
+    - 3: Good translation integration
+- Word mastery level changes
+    - Correct recognition: +1
+    - Incorrect recognition: -1
+    - Correct recall: +1
+    - Incorrect recall: -2
+    - Correct sentence integration: +1
+    - Incorrect sentence integration: -1
+    - Correct translation integration: +1
+    - Incorrect translation integration: -2
+- Word mastery long term repetition
+    - 1 day
+    - 2 days
+    - 4 days
+    - 1 week
+    - 2 weeks
+    - 1 month
+    - 2 months
+    - 4 months
+    - 6 months
+    - 1 year
+    - 2 years
+- Word mastery long term repetition rules
+    - Each category is reset to 1 after each repetition milestone for each word
+- Within each session, use pomodoro timing, 25 mins on, 5 mins off
+
 
 - Minigames
     - Given foreign word, choose from list of English translations

@@ -16,8 +16,8 @@ async function getQuestion(n: number, items: number = 4) {
         const target = data[randomIndex];
 
         return {
-            text: target.foreign_value,
-            answers: data.map(item => item.english_value),
+            text: target.english_value,
+            answers: data.map(item => item.foreign_value),
             correctIndex: randomIndex
         };
     } catch (error) {

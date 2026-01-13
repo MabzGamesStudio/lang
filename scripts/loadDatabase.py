@@ -10,13 +10,24 @@ conn = sqlite3.connect(DB_PATH)
 cur = conn.cursor()
 
 cur.execute("""
+CREATE TABLE IF NOT EXISTS image_data (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    image_description TEXT NOT NULL,
+    data BLOB NOT NULL
+)
+""")
+
+cur.execute("""
 CREATE TABLE IF NOT EXISTS words_list (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     language TEXT,
     frequency_rank INTEGER,
     frequency_group_rank INTEGER,
     english_value TEXT,
-    foreign_value TEXT
+    foreign_value TEXT,
+    packed_levels BLOB,
+    image_id INTEGER,
+    FOREIGN KEY (image_id) REFERENCES image_data(id)
 )
 """)
 
@@ -32,14 +43,15 @@ with open(CSV_PATH, newline="", encoding="utf-8") as f:
             1 + (idx // 7),
             str(r["english_value"]),
             str(r["foreign_value"]),
+            b'\x00\x00'
         )
         for idx, r in enumerate(reader, 1)
     ]
 
 insert_sql = """
 INSERT OR REPLACE INTO words_list
-(id, language, frequency_rank, frequency_group_rank, english_value, foreign_value)
-VALUES (?, ?, ?, ?, ?, ?)
+(id, language, frequency_rank, frequency_group_rank, english_value, foreign_value, packed_levels, image_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
 """
 
 cur.executemany(insert_sql, rows)
