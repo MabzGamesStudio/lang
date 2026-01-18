@@ -1,5 +1,6 @@
 import NavButtons from "../../components/NavButtons";
 import { useState, useEffect } from "react";
+import { wordService } from '../../services/wordsListService';
 
 const TOTAL_GROUPS = 143;
 
@@ -18,6 +19,7 @@ async function getQuestion(n: number, items: number = 4) {
         return {
             text: target.english_value,
             answers: data.map(item => item.foreign_value),
+            ids: data.map(item => item.id),
             correctIndex: randomIndex
         };
     } catch (error) {
@@ -88,7 +90,8 @@ export default function EnglishWordPickForeignList() {
 
         setSelected(i);
 
-        if (i === currentQuestion.correctIndex) {
+        const isCorrect = i === currentQuestion.correctIndex;
+        if (isCorrect) {
             setTimeout(() => {
                 // Only load a NEW one if we are at the end of history
                 if (pointer === history.length - 1) {
@@ -100,6 +103,11 @@ export default function EnglishWordPickForeignList() {
                 }
             }, 300);
         }
+
+        wordService.postRecognitionAnswerResult(
+            isCorrect,
+            currentQuestion.ids[i],
+            currentQuestion.ids[currentQuestion.correctIndex]);
     }
 
     // Navigation Handlers

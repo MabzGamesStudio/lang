@@ -63,9 +63,9 @@
     - Listen to foreign word, choose from list of English words
     - Listen to English word, choose from list of foreign words
 
-    - Given foreign word, type the English translation
-    - Given English word, type the foreign translation
-    - Given image, type the foreign translation
+    - Given foreign word, type the English word
+    - Given English word, type the foreign word
+    - Given image, type the foreign word
     - Listen to foreign word, type the foreign word
     - Listen to foreign word, type the English word
     - Listen to English word, type the foreign word

@@ -24,3 +24,5 @@ yarn-error.log*
 
 # Optional: Personal notes or IDE config
 .vscode/
+**/images/
+app.db

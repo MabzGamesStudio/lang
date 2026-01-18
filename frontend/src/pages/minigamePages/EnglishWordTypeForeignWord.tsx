@@ -1,7 +1,11 @@
+import ExtraCharacters from "../../components/extraCharacters";
 import NavButtons from "../../components/NavButtons";
 import { useState, useEffect, useRef } from "react";
+import { wordService } from "../../services/wordsListService";
 
 const TOTAL_GROUPS = 143;
+
+const SPECIAL_CHARS = ['ñ', 'á', 'é', 'í', 'ó', 'ú', 'ü'];
 
 async function getQuestion(n: number, items: number = 4) {
     if (n === 0) return null;
@@ -13,8 +17,9 @@ async function getQuestion(n: number, items: number = 4) {
         const data = await response.json();
 
         return {
-            text: data.foreign_value,
-            answer: data.english_value,
+            text: data.english_value,
+            answer: data.foreign_value,
+            id: data.id
         };
     } catch (error) {
         console.error("Failed to fetch question:", error);
@@ -106,6 +111,9 @@ export default function EnglishWordTypeForeignWord() {
     const handleSubmit = (e) => {
         e.preventDefault();
         if (loading || !currentQuestion) return;
+
+        const alreadyAnswered = isSubmitted;
+
         setIsSubmitted(true);
 
         const userCorrect = inputValue.trim().toLowerCase() === currentQuestion.answer.toLowerCase();
@@ -123,14 +131,16 @@ export default function EnglishWordTypeForeignWord() {
             }, 300);
         }
 
-
+        if (!alreadyAnswered) {
+            wordService.postRecallAnswerResult(userCorrect, currentQuestion.id);
+        }
     };
 
     return (
         <div className="page">
             <NavButtons />
 
-            <h1 className="page-title">Recall: Given Foreign Word Type English Word</h1>
+            <h1 className="page-title">Recall: Given English Word Type Foreign Word</h1>
 
             <div className="input-row">
                 <label>Choose words from up to group (1-143):</label>
@@ -169,6 +179,7 @@ export default function EnglishWordTypeForeignWord() {
                 <button onClick={goBack} disabled={pointer <= 0}>←</button>
                 <button onClick={goForward} disabled={pointer > history.length - 1}>→</button>
             </div>
+            <ExtraCharacters activeInputRef={inputRef} characters={SPECIAL_CHARS} />
         </div>
     );
 }

@@ -1,5 +1,6 @@
 import NavButtons from "../../components/NavButtons";
 import { useState, useEffect, useRef } from "react";
+import { wordService } from "../../services/wordsListService";
 
 const TOTAL_GROUPS = 143;
 
@@ -13,8 +14,9 @@ async function getQuestion(n: number, items: number = 4) {
         const data = await response.json();
 
         return {
-            text: data.english_value,
-            answer: data.foreign_value,
+            text: data.foreign_value,
+            answer: data.english_value,
+            id: data.id
         };
     } catch (error) {
         console.error("Failed to fetch question:", error);
@@ -105,8 +107,11 @@ export default function ForeignWordTypeEnglishWord() {
 
     const handleSubmit = (e) => {
         e.preventDefault();
+
         if (loading || !currentQuestion) return;
         setIsSubmitted(true);
+
+        const alreadyAnswered = isSubmitted;
 
         const userCorrect = inputValue.trim().toLowerCase() === currentQuestion.answer.toLowerCase();
         setIsCorrect(userCorrect);
@@ -123,7 +128,9 @@ export default function ForeignWordTypeEnglishWord() {
             }, 300);
         }
 
-
+        if (!alreadyAnswered) {
+            wordService.postRecallAnswerResult(userCorrect, currentQuestion.id);
+        }
     };
 
     return (
@@ -169,6 +176,7 @@ export default function ForeignWordTypeEnglishWord() {
                 <button onClick={goBack} disabled={pointer <= 0}>←</button>
                 <button onClick={goForward} disabled={pointer > history.length - 1}>→</button>
             </div>
+
         </div>
     );
 }

@@ -163,3 +163,44 @@ $wrong-color: #f44336;
     border: 1px solid var(--border);
     cursor: pointer;
 }
+
+.extra-characters {
+    display: flex;
+    gap: 8px;
+    padding: 10px;
+
+    button {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        width: 60px;
+        height: 60px;
+        cursor: pointer;
+        background-color: #ffffff;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        transition: background-color 0.2s;
+
+        &:hover {
+            background-color: #f0f0f0;
+        }
+
+        &:active {
+            background-color: #e0e0e0;
+        }
+
+        sup {
+            font-size: 0.7em;
+            color: #999;
+            pointer-events: none; // Ensures clicks pass through to button
+        }
+
+        span {
+            font-size: 2em;
+            font-weight: bold;
+            pointer-events: none;
+            line-height: 1;
+        }
+    }
+}
