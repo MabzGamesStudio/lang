@@ -37,6 +37,7 @@ export default function ForeignWordPickEnglishList() {
     const [maxGroupIndex, setMaxGroupIndex] = useState(1);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
+    const [perfectUpToIndex, setPerfectUpToIndex] = useState(false);
 
     // Helper: The currently visible question
     const currentQuestion = history[pointer];
@@ -63,10 +64,17 @@ export default function ForeignWordPickEnglishList() {
         }
     }
 
-    // Initial load
     useEffect(() => {
         if (history.length === 0) fetchAndAppendQuestion();
     }, []);
+
+    useEffect(() => {
+        updateStarIfPerfect()
+    }, [maxGroupIndex]);
+
+    async function updateStarIfPerfect() {
+        setPerfectUpToIndex(await wordService.getIsPerfect('spanish', 'recognition', maxGroupIndex));
+    }
 
     function editGroup(event) {
         const inputValue = event.target.value;
@@ -108,6 +116,7 @@ export default function ForeignWordPickEnglishList() {
             isCorrect,
             currentQuestion.ids[i],
             currentQuestion.ids[currentQuestion.correctIndex]);
+        updateStarIfPerfect();
     }
 
     // Navigation Handlers
@@ -144,6 +153,7 @@ export default function ForeignWordPickEnglishList() {
                     value={maxGroupIndex}
                     onChange={editGroup}
                 />
+                {perfectUpToIndex && <div>★</div>}
             </div>
 
             <div className="question">

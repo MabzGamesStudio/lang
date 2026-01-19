@@ -35,6 +35,7 @@ export default function ForeignWordTypeEnglishWord() {
     const [inputValue, setInputValue] = useState("");
     const [isSubmitted, setIsSubmitted] = useState(false);
     const [isCorrect, setIsCorrect] = useState(null);
+    const [perfectUpToIndex, setPerfectUpToIndex] = useState(false);
 
     const inputRef = useRef(null);
 
@@ -66,6 +67,14 @@ export default function ForeignWordTypeEnglishWord() {
     useEffect(() => {
         if (history.length === 0) fetchAndAppendQuestion();
     }, []);
+
+    useEffect(() => {
+        updateStarIfPerfect()
+    }, [maxGroupIndex]);
+
+    async function updateStarIfPerfect() {
+        setPerfectUpToIndex(await wordService.getIsPerfect('spanish', 'recall', maxGroupIndex));
+    }
 
     function editGroup(event) {
         const inputValue = event.target.value;
@@ -129,7 +138,8 @@ export default function ForeignWordTypeEnglishWord() {
         }
 
         if (!alreadyAnswered) {
-            wordService.postRecallAnswerResult(userCorrect, currentQuestion.id);
+            wordService.postRecallAnswerResult(userCorrect, currentQuestion.id)
+                .then(updateStarIfPerfect);
         }
     };
 
@@ -148,6 +158,7 @@ export default function ForeignWordTypeEnglishWord() {
                     value={maxGroupIndex}
                     onChange={editGroup}
                 />
+                {perfectUpToIndex && <div>★</div>}
             </div>
 
             <div className="question">

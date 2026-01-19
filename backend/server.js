@@ -5,6 +5,13 @@ import cors from "cors";
 export function createServer() {
     const app = express();
 
+    let isPerfectCache = {
+        recognition: null,
+        recall: null,
+        recite: null,
+        translate: null
+    }
+
     app.use(cors());
 
     app.get("/api/hello", (req, res) => {
@@ -22,19 +29,37 @@ export function createServer() {
         }
 
         try {
+            const poolSize = items * 2;
+
             const stmt = db.prepare(`
                 SELECT * FROM words_list 
                 WHERE language = ? 
                 AND frequency_group_rank <= ? 
                 ORDER BY recognition_level ASC, RANDOM()
-                LIMIT ?
+                LIMIT ?;
             `);
 
-            // 2. Execute it synchronously
-            const rows = stmt.all(language, groupSubset, items);
+            const pool = stmt.all(language, groupSubset, poolSize);
 
-            // 3. Send the response
-            res.json(rows);
+            const finalSelection = [];
+            const seenEnglish = new Set();
+            const seenForeign = new Set();
+
+            for (const row of pool) {
+                if (finalSelection.length >= items) break;
+
+                const english = row.english_value;
+                const foreign = row.foreign_value;
+
+                if (!seenEnglish.has(english) && !seenForeign.has(foreign)) {
+                    finalSelection.push(row);
+                    seenEnglish.add(english);
+                    seenForeign.add(foreign);
+                }
+            }
+
+            res.json(finalSelection);
+
         } catch (err) {
             console.error("Database Error:", err.message);
             res.status(500).json({ error: "Database error" });
@@ -68,32 +93,48 @@ export function createServer() {
         }
     });
 
+    app.get("/api/:language/:levelType/:groupSubset/isPerfect", (req, res) => {
+        const { language, levelType, groupSubset } = req.params;
+        const perfectScore = parseInt(req.query.groupSubset ?? '3');
+
+        if (isNaN(groupSubset) || !Number.isInteger(Number(groupSubset)) || Number(groupSubset) < 1) {
+            return res.status(400).json({ error: "groupSubset must be a positive integer" });
+        }
+
+        const variableName = getDatabaseVariable(levelType);
+
+        try {
+
+            const stmt = db.prepare(`
+                SELECT 
+                    (COUNT(*) = SUM(CASE WHEN ${variableName} = ? THEN 1 ELSE 0 END)) as isPerfect
+                FROM words_list
+                WHERE frequency_group_rank <= ?
+                AND language = ?;
+            `);
+
+            const result = stmt.get(perfectScore, groupSubset, language);
+
+            res.json(result);
+        } catch (err) {
+            console.error("Database Error:", err.message);
+            res.status(500).json({ error: "Database error" });
+        }
+    });
+
     app.put("/api/wordsList/:wordId/:levelType/:result", (req, res) => {
         const { wordId, levelType, result } = req.params;
 
         try {
 
-            let variableName;
-            switch (levelType) {
-                case 'recognition':
-                    variableName = 'recognition_level';
-                    break;
-                case 'recall':
-                    variableName = 'recall_level';
-                    break;
-                case 'recite':
-                    variableName = 'recite_level';
-                    break;
-                case 'translate':
-                    variableName = 'translate_level';
-                    break;
-                default:
-                    res.status(400).json({ error: "Level type invalid" });
-                    break;
+            const variableName = getDatabaseVariable(levelType);
+            if (variableName === null) {
+                res.status(400).json({ error: "Level type invalid" });
+                return;
             }
 
             const levelTypeResult = `${levelType}|${result}`;
-            let changeValue = 0;
+            let changeValue = "";
             switch (levelTypeResult) {
                 case 'recognition|+':
                     changeValue = '+ 1';
@@ -146,4 +187,19 @@ export function createServer() {
     });
 
     return app;
+}
+
+function getDatabaseVariable(levelType) {
+    switch (levelType) {
+        case 'recognition':
+            return 'recognition_level';
+        case 'recall':
+            return 'recall_level';
+        case 'recite':
+            return 'recite_level';
+        case 'translate':
+            return 'translate_level';
+        default:
+            return null;
+    }
 }

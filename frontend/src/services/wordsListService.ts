@@ -1,9 +1,22 @@
-import { apiClient } from '../apis/client';
-
 export type LevelType = 'recognition' | 'recall' | 'recite' | 'translate';
 export type ResultType = '+' | '-';
 
+const BASE_URL = 'http://localhost:3000'
+
 export const wordService = {
+
+    getIsPerfect: async (language: string, levelType: string, groupSubset: number, perfectScore?: number) => {
+
+        const url = `${BASE_URL}/api/${language}/${levelType}/${groupSubset}/isPerfect?perfectScore=${perfectScore ?? 3}`;
+
+        const response = await fetch(url);
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return (await response.json()).isPerfect === 1;
+
+    },
 
     postRecognitionAnswerResult: async (isCorrect: boolean, guessWordId: number, answerWordId: number) => {
         if (isCorrect !== (guessWordId === answerWordId)) {
@@ -14,7 +27,7 @@ export const wordService = {
         const result = isCorrect ? '+' : '-';
 
         if (isCorrect) {
-            const url = `http://localhost:3000/api/wordsList/${guessWordId}/recognition/${result}`;
+            const url = `${BASE_URL}/api/wordsList/${guessWordId}/recognition/${result}`;
 
             const response = await fetch(url, {
                 method: 'PUT',
@@ -27,7 +40,7 @@ export const wordService = {
                 throw new Error(`Response status: ${response.status}`);
             }
         } else {
-            const url1 = `http://localhost:3000/api/wordsList/${guessWordId}/recognition/${result}`;
+            const url1 = `${BASE_URL}/api/wordsList/${guessWordId}/recognition/${result}`;
 
             const response1 = await fetch(url1, {
                 method: 'PUT',
@@ -40,7 +53,7 @@ export const wordService = {
                 throw new Error(`Response status: ${response1.status}`);
             }
 
-            const url2 = `http://localhost:3000/api/wordsList/${answerWordId}/recognition/${result}`;
+            const url2 = `${BASE_URL}/api/wordsList/${answerWordId}/recognition/${result}`;
 
             const response2 = await fetch(url2, {
                 method: 'PUT',
@@ -59,7 +72,7 @@ export const wordService = {
 
         const result = isCorrect ? '+' : '-';
 
-        const url = `http://localhost:3000/api/wordsList/${guessWordId}/recall/${result}`;
+        const url = `${BASE_URL}/api/wordsList/${guessWordId}/recall/${result}`;
 
         const response = await fetch(url, {
             method: 'PUT',
