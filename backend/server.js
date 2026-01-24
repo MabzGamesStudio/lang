@@ -5,13 +5,6 @@ import cors from "cors";
 export function createServer() {
     const app = express();
 
-    let isPerfectCache = {
-        recognition: null,
-        recall: null,
-        recite: null,
-        translate: null
-    }
-
     app.use(cors());
 
     app.get("/api/hello", (req, res) => {
@@ -180,6 +173,42 @@ export function createServer() {
             res.json({
                 success: true
             });
+        } catch (err) {
+            console.error("Database Error:", err.message);
+            res.status(500).json({ error: "Database error" });
+        }
+    });
+
+    app.get("/api/:language/isSynonym", (req, res) => {
+        const { language } = req.params;
+        const givenWord = req.query.givenWord;
+        const userAnswer = req.query.userAnswer;
+        const isEnglishAnswer = req.query.isEnglishAnswer;
+
+        if (givenWord === undefined || userAnswer === undefined) {
+            return res.status(400).json({ error: "givenWord and userAnswer query parameters required." });
+        }
+
+        try {
+
+            const stmt = db.prepare(`
+                SELECT EXISTS(
+                    SELECT 1 
+                    FROM words_list 
+                    WHERE english_value = ? 
+                    AND foreign_value = ?
+                    AND language = ?
+                ) AS is_correct;
+            `);
+
+            let result;
+            if (isEnglishAnswer === "true") {
+                result = stmt.get(userAnswer, givenWord, language);
+            } else {
+                result = stmt.get(givenWord, userAnswer, language);
+            }
+
+            res.json(result);
         } catch (err) {
             console.error("Database Error:", err.message);
             res.status(500).json({ error: "Database error" });

@@ -90,7 +90,7 @@ export default function ForeignWordTypeEnglishWord() {
             setMaxGroupIndex(TOTAL_GROUPS);
             return;
         }
-        setMaxGroupIndex(Number(inputValue).toFixed(0));
+        setMaxGroupIndex(Number(inputValue));
     }
 
     // Navigation Handlers
@@ -114,7 +114,7 @@ export default function ForeignWordTypeEnglishWord() {
         }
     };
 
-    const handleSubmit = (e) => {
+    const handleSubmit = async (e) => {
         e.preventDefault();
 
         if (loading || !currentQuestion) return;
@@ -122,7 +122,25 @@ export default function ForeignWordTypeEnglishWord() {
 
         const alreadyAnswered = isSubmitted;
 
-        const userCorrect = inputValue.trim().toLowerCase() === currentQuestion.answer.toLowerCase();
+        const userGuess = inputValue.trim().toLowerCase()
+        const expectedAnswer = currentQuestion.answer.toLowerCase();
+        const questionText = currentQuestion.text.toLowerCase();
+        let userCorrect = userGuess === expectedAnswer;
+
+        if (!userCorrect) {
+            try {
+                const response = await fetch(`http://localhost:3000/api/spanish/isSynonym?givenWord=${questionText}&userAnswer=${userGuess}&isEnglishAnswer=true`);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+                userCorrect = data.is_correct === 1;
+            } catch (error) {
+                console.error("Failed to fetch question:", error);
+                return null;
+            }
+        }
+
         setIsCorrect(userCorrect);
         if (userCorrect) {
             setTimeout(() => {
@@ -180,7 +198,7 @@ export default function ForeignWordTypeEnglishWord() {
             </div>
 
             <div className="feedback-area">
-                {isCorrect === false && <p className="msg error">{currentQuestion?.answer}</p>}
+                {isCorrect !== null && <p className="msg error">{currentQuestion?.answer}</p>}
             </div>
 
             <div className="nav-arrows">
