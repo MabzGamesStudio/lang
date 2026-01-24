@@ -3,33 +3,10 @@ import { useEffect } from "react";
 interface ExtraCharactersInput {
     characters: string[];
     activeInputRef: any;
+    insertCharacter: (char: string) => void;
 }
 
-export default function ExtraCharacters({ activeInputRef, characters }: ExtraCharactersInput) {
-
-    const insertCharacter = (char: string) => {
-        const activeElement = document.activeElement as HTMLInputElement | HTMLTextAreaElement;
-
-        if (!activeInputRef.current || document.activeElement !== activeInputRef.current) {
-            return;
-        }
-
-        // Check if the focused element is actually a text field
-        if (activeElement && (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA')) {
-            const start = activeElement.selectionStart || 0;
-            const end = activeElement.selectionEnd || 0;
-            const text = activeElement.value;
-
-            // Insert the character at the cursor position
-            activeElement.value = text.substring(0, start) + char + text.substring(end);
-
-            // Restore cursor position after character
-            activeElement.setSelectionRange(start + 1, start + 1);
-
-            // Trigger an 'input' event so React/other frameworks notice the change
-            activeElement.dispatchEvent(new Event('input', { bubbles: true }));
-        }
-    };
+export default function ExtraCharacters({ activeInputRef, characters, insertCharacter }: ExtraCharactersInput) {
 
     useEffect(() => {
         const handleKeyDown = (event: KeyboardEvent) => {

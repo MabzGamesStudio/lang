@@ -80,3 +80,8 @@
 
 LLM prompts:
 - Respond with a single sentence in <language> only allowing these words: [<randomize list of words for variety>]
+
+
+Priorities:
+1. Fix typing issue with words that are spelled the same
+2. Images recognition minigame

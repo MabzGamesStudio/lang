@@ -1,4 +1,4 @@
-import ExtraCharacters from "../../components/extraCharacters";
+import ExtraCharacters from "../../components/ExtraCharacters";
 import NavButtons from "../../components/NavButtons";
 import { useState, useEffect, useRef } from "react";
 import { wordService } from "../../services/wordsListService";
@@ -32,7 +32,7 @@ export default function EnglishWordTypeForeignWord() {
     const [history, setHistory] = useState([]); // Array of question objects
     const [pointer, setPointer] = useState(-1);  // Index of the visible question
 
-    const [maxGroupIndex, setMaxGroupIndex] = useState(1);
+    const [maxGroupIndex, setMaxGroupIndex] = useState<number>(1);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
     const [inputValue, setInputValue] = useState("");
@@ -72,6 +72,10 @@ export default function EnglishWordTypeForeignWord() {
     }, []);
 
     useEffect(() => {
+    }, [inputRef]);
+
+    useEffect(() => {
+
         updateStarIfPerfect()
     }, [maxGroupIndex]);
 
@@ -79,21 +83,26 @@ export default function EnglishWordTypeForeignWord() {
         setPerfectUpToIndex(await wordService.getIsPerfect('spanish', 'recall', maxGroupIndex));
     }
 
-    function editGroup(event) {
-        const inputValue = event.target.value;
-        if (isNaN(inputValue) || inputValue === "") {
+    function editGroup(event: React.ChangeEvent<HTMLInputElement>) {
+        let rawValue = event.target.value;
+
+        const digitsOnly = rawValue.replace(/\D/g, "");
+
+        if (digitsOnly === "") {
             setMaxGroupIndex(0);
             return;
         }
-        if (inputValue < 0) {
-            setMaxGroupIndex(0);
-            return;
+
+        let numericValue = parseInt(digitsOnly, 10);
+
+        const TOTAL_GROUPS = 143;
+        if (numericValue < 0) {
+            numericValue = 0;
+        } else if (numericValue > TOTAL_GROUPS) {
+            numericValue = TOTAL_GROUPS;
         }
-        if (inputValue > TOTAL_GROUPS) {
-            setMaxGroupIndex(TOTAL_GROUPS);
-            return;
-        }
-        setMaxGroupIndex(Number(inputValue).toFixed(0));
+
+        setMaxGroupIndex(Math.floor(numericValue));
     }
 
     // Navigation Handlers
@@ -146,6 +155,26 @@ export default function EnglishWordTypeForeignWord() {
         }
     };
 
+    const insertCharacter = (char: string) => {
+
+        if (!inputRef.current) return;
+
+        const start = inputRef.current.selectionStart;
+        const end = inputRef.current.selectionStart;
+
+        // setInputValue(newValue);
+        setInputValue((prev) => {
+            // 'prev' is guaranteed to be the current state
+            return prev.substring(0, start) + char + prev.substring(end);
+        });
+
+        // Use a timeout to reset the cursor after the state render
+        setTimeout(() => {
+            inputRef.current.focus();
+            inputRef.current.setSelectionRange(start + 1, start + 1);
+        }, 0);
+    }
+
     return (
         <div className="page">
             <NavButtons />
@@ -158,7 +187,7 @@ export default function EnglishWordTypeForeignWord() {
                     type="number"
                     min={1}
                     max={TOTAL_GROUPS}
-                    value={maxGroupIndex}
+                    value={maxGroupIndex.toString()}
                     onChange={editGroup}
                 />
                 {perfectUpToIndex && <div>★</div>}
@@ -175,7 +204,9 @@ export default function EnglishWordTypeForeignWord() {
                         type="text"
                         className={`answer-input ${isSubmitted ? (isCorrect ? 'correct' : 'wrong') : ''}`}
                         value={inputValue}
-                        onChange={(e) => setInputValue(e.target.value)}
+                        onChange={(e) => {
+                            setInputValue(e.target.value);
+                        }}
                         autoFocus
                     />
 
@@ -190,7 +221,7 @@ export default function EnglishWordTypeForeignWord() {
                 <button onClick={goBack} disabled={pointer <= 0}>←</button>
                 <button onClick={goForward} disabled={pointer > history.length - 1}>→</button>
             </div>
-            <ExtraCharacters activeInputRef={inputRef} characters={SPECIAL_CHARS} />
+            <ExtraCharacters activeInputRef={inputRef} characters={SPECIAL_CHARS} insertCharacter={insertCharacter} />
         </div>
     );
 }
