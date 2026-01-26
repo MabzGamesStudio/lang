@@ -83,8 +83,6 @@ LLM prompts:
 
 
 Priorities:
-1. Add script to add image descriptors to entry
-2. Images recognition minigame
-3. Add word sound data to database
-4. Add minigame with sound input
-5. Code cleanup
+1. Add word sound data to database
+2. Add minigame with sound input
+3. Code cleanup

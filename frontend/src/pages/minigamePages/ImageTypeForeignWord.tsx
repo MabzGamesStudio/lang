@@ -1,34 +1,58 @@
-import ExtraCharacters from "../../components/ExtraCharacters";
 import NavButtons from "../../components/NavButtons";
 import { useState, useEffect, useRef } from "react";
-import { wordService } from "../../services/wordsListService";
+import { wordService } from '../../services/wordsListService';
+import ExtraCharacters from "../../components/ExtraCharacters";
 
 const TOTAL_GROUPS = 143;
 
 const SPECIAL_CHARS = ['ñ', 'á', 'é', 'í', 'ó', 'ú', 'ü'];
 
-async function getQuestion(n: number, items: number = 4) {
+async function getQuestion(n: number, items: number = 3) {
     if (n === 0) return null;
+
     try {
-        const response = await fetch(`http://localhost:3000/api/spanish/singleWord?groupSubset=${n}`);
-        if (!response.ok) {
+        const response = await fetch(`http://localhost:3000/api/spanish/image?groupSubset=${n}`);
+
+        if (response.status === 404) {
+            return {
+                image: null,
+                answers: null,
+                otherAnswers: null
+            };
+        } else if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
+
         const data = await response.json();
 
+        const base64String = btoa(
+            new Uint8Array(data.image.data || data.image)
+                .reduce((data, byte) => data + String.fromCharCode(byte), '')
+        );
+        const imageSrc = `data:image/jpeg;base64,${base64String}`;
+
+        const validCorrectAnswers = data.words.filter(
+            word => word.group_id <= n
+        );
+
+        const correctEntry = validCorrectAnswers[Math.floor(Math.random() * validCorrectAnswers.length)];
+        const correctAnswerText = correctEntry.foreign_value;
+        const correctAnswerId = correctEntry.id;
+
         return {
-            text: data.english_value,
-            answer: data.foreign_value,
-            id: data.id
+            image: imageSrc,
+            answers: data.words,
+            correctAnswerText: correctAnswerText,
+            correctAnswerId: correctAnswerId
         };
+
     } catch (error) {
         console.error("Failed to fetch question:", error);
         return null;
     }
 }
 
-export default function EnglishWordTypeForeignWord() {
-    // 1. New State Structure
+export default function ImageTypeForeignWord() {
     const [history, setHistory] = useState([]); // Array of question objects
     const [pointer, setPointer] = useState(-1);  // Index of the visible question
 
@@ -134,26 +158,10 @@ export default function EnglishWordTypeForeignWord() {
         setIsSubmitted(true);
 
         const userGuess = inputValue.trim().toLowerCase();
-        const expectedAnswer = currentQuestion.answer.toLowerCase();
-        const questionText = currentQuestion.text.toLowerCase();
-        let userCorrect = userGuess === expectedAnswer;
+        const isCorrect = currentQuestion.answers.map(entry => entry.foreign_value).includes(userGuess);
 
-        if (!userCorrect) {
-            try {
-                const response = await fetch(`http://localhost:3000/api/spanish/isSynonym?givenWord=${questionText}&userAnswer=${userGuess}&isEnglishAnswer=false`);
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const data = await response.json();
-                userCorrect = data.is_correct === 1;
-            } catch (error) {
-                console.error("Failed to fetch question:", error);
-                return null;
-            }
-        }
-
-        setIsCorrect(userCorrect);
-        if (userCorrect) {
+        setIsCorrect(isCorrect);
+        if (isCorrect) {
             setTimeout(() => {
                 if (pointer === history.length - 1) {
                     fetchAndAppendQuestion();
@@ -167,7 +175,7 @@ export default function EnglishWordTypeForeignWord() {
         }
 
         if (!alreadyAnswered) {
-            wordService.postRecallAnswerResult(userCorrect, currentQuestion.id)
+            wordService.postRecallAnswerResult(isCorrect, currentQuestion.correctAnswerId)
                 .then(updateStarIfPerfect);
         }
     };
@@ -211,7 +219,7 @@ export default function EnglishWordTypeForeignWord() {
             </div>
 
             <div className="question">
-                {currentQuestion?.text}
+                {currentQuestion?.image ? <img src={currentQuestion.image} className="question-image" /> : <div>No images could be fetched, increase the group index to include more words, and click the next arrow to try to fetch again</div>}
             </div>
 
             <div className="answer-container">
@@ -231,7 +239,7 @@ export default function EnglishWordTypeForeignWord() {
             </div>
 
             <div className="feedback-area">
-                {isCorrect !== null && <p className="msg error">{currentQuestion?.answer}</p>}
+                {isCorrect !== null && <p className="msg error">{currentQuestion?.correctAnswerText}</p>}
             </div>
 
             <div className="nav-arrows">

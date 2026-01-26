@@ -6,6 +6,7 @@ import EnglishWordPickForeignList from "./pages/minigamePages/EnglishWordPickFor
 import ForeignWordTypeEnglishWord from "./pages/minigamePages/ForeignWordTypeEnglishWord";
 import EnglishWordTypeForeignWord from "./pages/minigamePages/EnglishWordTypeForeignWord";
 import ImagePickForeignList from "./pages/minigamePages/ImagePickForeignList";
+import ImageTypeForeignWord from "./pages/minigamePages/ImageTypeForeignWord";
 
 function App() {
     return (
@@ -18,6 +19,8 @@ function App() {
                 <Route path="/minigames/imagePickForeignList" element={<ImagePickForeignList />} />
                 <Route path="/minigames/foreignWordTypeEnglishWord" element={<ForeignWordTypeEnglishWord />} />
                 <Route path="/minigames/englishWordTypeForeignWord" element={<EnglishWordTypeForeignWord />} />
+                <Route path="/minigames/imageTypeForeignWord" element={<ImageTypeForeignWord />} />
+
                 <Route path="*" element={<NotFoundPage />} />
             </Routes>
         </BrowserRouter>
