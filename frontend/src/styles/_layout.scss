@@ -164,6 +164,11 @@ $wrong-color: #f44336;
     cursor: pointer;
 }
 
+.question-image {
+    height: 6em;
+    max-width: 16em;
+}
+
 .extra-characters {
     display: flex;
     gap: 8px;

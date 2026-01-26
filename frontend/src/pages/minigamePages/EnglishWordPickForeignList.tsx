@@ -77,20 +77,24 @@ export default function EnglishWordPickForeignList() {
     }
 
     function editGroup(event) {
-        const inputValue = event.target.value;
-        if (isNaN(inputValue) || inputValue === "") {
+        let rawValue = event.target.value;
+
+        const digitsOnly = rawValue.replace(/\D/g, "");
+
+        if (digitsOnly === "") {
             setMaxGroupIndex(0);
             return;
         }
-        if (inputValue < 0) {
-            setMaxGroupIndex(0);
-            return;
+
+        let numericValue = parseInt(digitsOnly, 10);
+
+        if (numericValue < 0) {
+            numericValue = 0;
+        } else if (numericValue > TOTAL_GROUPS) {
+            numericValue = TOTAL_GROUPS;
         }
-        if (inputValue > TOTAL_GROUPS) {
-            setMaxGroupIndex(TOTAL_GROUPS);
-            return;
-        }
-        setMaxGroupIndex(Number(inputValue).toFixed(0));
+
+        setMaxGroupIndex(Math.floor(numericValue));
     }
 
     function selectAnswer(i) {
@@ -150,7 +154,7 @@ export default function EnglishWordPickForeignList() {
                     type="number"
                     min={1}
                     max={TOTAL_GROUPS}
-                    value={maxGroupIndex}
+                    value={maxGroupIndex.toString()}
                     onChange={editGroup}
                 />
                 {perfectUpToIndex && <div>★</div>}

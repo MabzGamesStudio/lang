@@ -139,7 +139,7 @@ export function createServer() {
                     changeValue = '+ 1';
                     break;
                 case 'recall|-':
-                    changeValue = '- 2';
+                    changeValue = '- 1';
                     break;
                 case 'recite|+':
                     changeValue = '+ 1';
@@ -151,7 +151,7 @@ export function createServer() {
                     changeValue = '+ 1';
                     break;
                 case 'translate|-':
-                    changeValue = '- 2';
+                    changeValue = '- 1';
                     break;
                 default:
                     res.status(400).json({ error: "Result invalid" });
@@ -213,6 +213,61 @@ export function createServer() {
             console.error("Database Error:", err.message);
             res.status(500).json({ error: "Database error" });
         }
+    });
+
+    app.get("/api/:language/image", (req, res) => {
+        const { language } = req.params;
+        const groupSubset = parseInt(req.query.groupSubset);
+
+        if (isNaN(groupSubset) || groupSubset < 1 || groupSubset > 143) {
+            return res.status(400).json({ error: "groupSubset must be a number from 1 to 143" });
+        }
+
+        // Query 1: Get a random word that fits criteria and has an image
+        try {
+            const randomWordSql = `
+                SELECT image_id 
+                FROM words_list 
+                WHERE language = ? 
+                AND frequency_group_rank <= ? 
+                AND image_id IS NOT NULL 
+                ORDER BY RANDOM() 
+                LIMIT 1
+            `;
+
+            const row = db.prepare(randomWordSql).get(language, groupSubset);
+            if (!row) return res.status(404).json({ error: "No words found with images in this range" });
+
+            const targetImageId = row.image_id;
+
+            // Query 2: Get the image BLOB and all foreign_values sharing that image_id
+            const dataSql = `
+                SELECT 
+                    (SELECT data FROM image_data WHERE id = ?) as imageBlob,
+                    group_concat(foreign_value || ':' || frequency_group_rank || ':' || id) as wordData
+                FROM words_list 
+                WHERE image_id = ?
+            `;
+
+            const dataRow = db.prepare(dataSql).get(targetImageId, targetImageId);
+
+            const wordsArray = dataRow.wordData ? dataRow.wordData.split(',').map(item => {
+                const [foreign_value, group_id, id] = item.split(':');
+                return {
+                    foreign_value,
+                    group_id: parseInt(group_id),
+                    id: parseInt(id),
+                };
+            }) : [];
+
+            res.json({
+                image: dataRow.imageBlob,
+                words: wordsArray
+            });
+        } catch (error) {
+            return res.status(500).json({ error: error.message });
+        }
+
     });
 
     return app;

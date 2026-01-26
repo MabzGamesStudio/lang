@@ -83,5 +83,8 @@ LLM prompts:
 
 
 Priorities:
-1. Fix typing issue with words that are spelled the same
+1. Add script to add image descriptors to entry
 2. Images recognition minigame
+3. Add word sound data to database
+4. Add minigame with sound input
+5. Code cleanup

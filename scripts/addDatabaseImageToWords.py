@@ -5,7 +5,8 @@ DB_NAME = "../langData/app.db"
 # --- Configuration ---
 # Format: (english_word_in_words_list, description_in_image_data)
 DATA_TO_LINK = [
-    ("dark", "night"),
+    # ("dark", "night"),
+    # ("more", "less"),
 ]
 
 def link_words_to_images():

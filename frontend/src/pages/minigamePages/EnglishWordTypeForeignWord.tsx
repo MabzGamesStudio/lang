@@ -95,7 +95,6 @@ export default function EnglishWordTypeForeignWord() {
 
         let numericValue = parseInt(digitsOnly, 10);
 
-        const TOTAL_GROUPS = 143;
         if (numericValue < 0) {
             numericValue = 0;
         } else if (numericValue > TOTAL_GROUPS) {
