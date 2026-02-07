@@ -22,6 +22,10 @@ CREATE TABLE IF NOT EXISTS words_list (
     recall_level INTEGER,
     recite_level INTEGER,
     translate_level INTEGER,
+    english_speech_male BLOB,
+    foreign_speech_male BLOB,
+    english_speech_female BLOB,
+    foreign_speech_female BLOB,
     image_id INTEGER,
     FOREIGN KEY (image_id) REFERENCES image_data(id)
 )
@@ -39,18 +43,14 @@ with open(CSV_PATH, newline="", encoding="utf-8") as f:
             1 + (idx // 7),
             str(r["english_value"]),
             str(r["foreign_value"]),
-            0,
-            0,
-            0,
-            0,
         )
         for idx, r in enumerate(reader, 1)
     ]
 
 insert_sql = """
 INSERT OR REPLACE INTO words_list
-(id, language, frequency_rank, frequency_group_rank, english_value, foreign_value, recognition_level, recall_level, recite_level, translate_level, image_id)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+(id, language, frequency_rank, frequency_group_rank, english_value, foreign_value, recognition_level, recall_level, recite_level, translate_level, english_speech_male, foreign_speech_male, english_speech_female, foreign_speech_female, image_id)
+VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, 0, NULL, NULL, NULL, NULL, NULL)
 """
 
 cur.executemany(insert_sql, rows)
