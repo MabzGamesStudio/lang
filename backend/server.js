@@ -15,22 +15,69 @@ export function createServer() {
         const { language } = req.params;
         const groupSubset = parseInt(req.query.groupSubset);
         const items = parseInt(req.query.items);
+        let includeSoundData = req.query.includeSoundData;
 
         // Validate that groupSubset is a number
         if (isNaN(groupSubset)) {
             return res.status(400).json({ error: "groupSubset must be a number" });
         }
 
+        let databaseSpeechParameter = includeSoundData;
+        if (includeSoundData === "english_speech" || includeSoundData === "foreign_speech") {
+            if (Math.random() < 0.5) {
+                databaseSpeechParameter += "_male";
+            } else {
+                databaseSpeechParameter += "_female";
+            }
+        } else {
+            includeSoundData = undefined;
+        }
+
         try {
             const poolSize = items * 2;
 
-            const stmt = db.prepare(`
-                SELECT * FROM words_list 
-                WHERE language = ? 
-                AND frequency_group_rank <= ? 
-                ORDER BY recognition_level ASC, RANDOM()
-                LIMIT ?;
-            `);
+            let databaseStatement;
+            if (includeSoundData !== undefined) {
+                databaseStatement = `
+                    SELECT
+                        id, 
+                        language, 
+                        frequency_rank, 
+                        frequency_group_rank, 
+                        english_value, 
+                        foreign_value, 
+                        recognition_level, 
+                        recall_level, 
+                        recite_level, 
+                        translate_level,
+                        ${databaseSpeechParameter} AS ${includeSoundData}
+                    FROM words_list 
+                    WHERE language = ? 
+                    AND frequency_group_rank <= ? 
+                    ORDER BY recognition_level ASC, RANDOM()
+                    LIMIT ?;
+                `;
+            } else {
+                databaseStatement = `
+                    SELECT
+                        id, 
+                        language, 
+                        frequency_rank, 
+                        frequency_group_rank, 
+                        english_value, 
+                        foreign_value, 
+                        recognition_level, 
+                        recall_level, 
+                        recite_level, 
+                        translate_level
+                    FROM words_list 
+                    WHERE language = ? 
+                    AND frequency_group_rank <= ? 
+                    ORDER BY recognition_level ASC, RANDOM()
+                    LIMIT ?;
+                `;
+            }
+            const stmt = db.prepare(databaseStatement);
 
             const pool = stmt.all(language, groupSubset, poolSize);
 

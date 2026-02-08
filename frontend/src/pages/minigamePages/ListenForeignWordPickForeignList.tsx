@@ -1,0 +1,233 @@
+import NavButtons from "../../components/NavButtons";
+import { useState, useEffect, useRef } from "react";
+import { wordService } from "../../services/wordsListService";
+
+const TOTAL_GROUPS = 143;
+
+async function getQuestion(n: number, items: number = 4) {
+    if (n === 0) return null;
+    try {
+        const response = await fetch(`http://localhost:3000/api/spanish/wordList?groupSubset=${n}&items=${items}&includeSoundData=foreign_speech`);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const data = await response.json();
+
+        const randomIndex = Math.floor(Math.random() * data.length);
+        const target = data[randomIndex];
+
+        return {
+            speechData: target.foreign_speech.data,
+            answers: data.map(item => item.foreign_value),
+            ids: data.map(item => item.id),
+            correctIndex: randomIndex
+        };
+    } catch (error) {
+        console.error("Failed to fetch question:", error);
+        return null;
+    }
+}
+
+export default function ListenForeignWordPickForeignList() {
+    // 1. New State Structure
+    const [history, setHistory] = useState([]); // Array of question objects
+    const [pointer, setPointer] = useState(-1);  // Index of the visible question
+
+    const [selected, setSelected] = useState(null);
+    const [maxGroupIndex, setMaxGroupIndex] = useState(1);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState(null);
+    const [perfectUpToIndex, setPerfectUpToIndex] = useState(false);
+
+    const audioRef = useRef<HTMLAudioElement | null>(null);
+    const [isThrottled, setIsThrottled] = useState(false);
+
+    // Helper: The currently visible question
+    const currentQuestion = history[pointer];
+
+    async function fetchAndAppendQuestion() {
+        setLoading(true);
+        try {
+            const data = await getQuestion(maxGroupIndex);
+            if (data) {
+                setHistory(prev => {
+                    const newHistory = [...prev, data];
+                    // Keep only the last 10
+                    if (newHistory.length > 10) newHistory.shift();
+                    return newHistory;
+                });
+                // Move pointer to the end (the newest question)
+                setPointer(prev => Math.min(prev + 1, 9));
+                setSelected(null);
+            }
+        } catch (err) {
+            setError(err.message);
+        } finally {
+            setLoading(false);
+        }
+    }
+
+    useEffect(() => {
+        if (history.length === 0) fetchAndAppendQuestion();
+    }, []);
+
+    useEffect(() => {
+        updateStarIfPerfect()
+    }, [maxGroupIndex]);
+
+    useEffect(() => {
+        if (currentQuestion?.speechData?.length > 0) {
+
+            const audioData = currentQuestion.speechData;
+
+            const byteArray = new Uint8Array(audioData);
+            const blob = new Blob([byteArray], { type: 'audio/mpeg' });
+            const url = URL.createObjectURL(blob);
+
+            audioRef.current = new Audio(url);
+
+            playSound();
+
+            return () => {
+                URL.revokeObjectURL(url);
+                audioRef.current?.pause();
+            };
+        }
+    }, [currentQuestion]);
+
+    async function updateStarIfPerfect() {
+        setPerfectUpToIndex(await wordService.getIsPerfect('spanish', 'recognition', maxGroupIndex));
+    }
+
+    const playSound = async () => {
+        if (!audioRef.current || isThrottled) return;
+
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
+
+        try {
+            await audioRef.current.play();
+
+            setIsThrottled(true);
+            setTimeout(() => setIsThrottled(false), 200);
+        } catch (err) {
+            console.warn("Autoplay blocked. User must click the button manually first.");
+        }
+    };
+
+    function editGroup(event) {
+        let rawValue = event.target.value;
+
+        const digitsOnly = rawValue.replace(/\D/g, "");
+
+        if (digitsOnly === "") {
+            setMaxGroupIndex(0);
+            return;
+        }
+
+        let numericValue = parseInt(digitsOnly, 10);
+
+        if (numericValue < 0) {
+            numericValue = 0;
+        } else if (numericValue > TOTAL_GROUPS) {
+            numericValue = TOTAL_GROUPS;
+        }
+
+        setMaxGroupIndex(Math.floor(numericValue));
+    }
+
+    function selectAnswer(i) {
+        if (selected !== null || loading || !currentQuestion) return;
+
+        setSelected(i);
+
+        const isCorrect = i === currentQuestion.correctIndex;
+        if (isCorrect) {
+            setTimeout(() => {
+                // Only load a NEW one if we are at the end of history
+                if (pointer === history.length - 1) {
+                    fetchAndAppendQuestion();
+                } else {
+                    // Just move forward in existing history
+                    setPointer(p => p + 1);
+                    setSelected(null);
+                }
+            }, 300);
+        }
+
+        wordService.postRecognitionAnswerResult(
+            isCorrect,
+            currentQuestion.ids[i],
+            currentQuestion.ids[currentQuestion.correctIndex]);
+        updateStarIfPerfect();
+    }
+
+    // Navigation Handlers
+    const goBack = () => {
+        if (pointer > 0) {
+            setPointer(pointer - 1);
+            setSelected(null); // Reset selection view for historical questions
+        }
+    };
+
+    const goForward = () => {
+        if (pointer === history.length - 1) {
+            fetchAndAppendQuestion();
+            return;
+        }
+        if (pointer < history.length - 1) {
+            setPointer(pointer + 1);
+            setSelected(null);
+        }
+    };
+
+    return (
+        <div className="page">
+            <NavButtons />
+
+            <h1 className="page-title">Recognition: Given Foreign Word Pick English Word From List</h1>
+
+            <div className="input-row">
+                <label>Choose words from up to group (1-143):</label>
+                <input
+                    type="number"
+                    min={1}
+                    max={TOTAL_GROUPS}
+                    value={maxGroupIndex.toString()}
+                    onChange={editGroup}
+                />
+                {perfectUpToIndex && <div>★</div>}
+            </div>
+
+            <div className="question">
+                <button
+                    className="play-audio-button"
+                    onClick={playSound}
+                    disabled={isThrottled}
+                >
+                    Play Audio
+                </button>
+            </div>
+
+            <div className="answers">
+                {currentQuestion?.answers.map((a, i) => {
+                    let className = "answer";
+                    if (selected !== null) {
+                        if (i === currentQuestion.correctIndex) className += " correct";
+                        else if (i === selected) className += " wrong";
+                    }
+                    return (
+                        <button key={i} className={className} onClick={() => selectAnswer(i)}>
+                            {a}
+                        </button>
+                    );
+                })}
+            </div>
+
+            <div className="nav-arrows">
+                <button onClick={goBack} disabled={pointer <= 0}>←</button>
+                <button onClick={goForward} disabled={pointer > history.length - 1}>→</button>
+            </div>
+        </div>
+    );
+}

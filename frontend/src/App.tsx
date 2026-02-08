@@ -7,6 +7,9 @@ import ForeignWordTypeEnglishWord from "./pages/minigamePages/ForeignWordTypeEng
 import EnglishWordTypeForeignWord from "./pages/minigamePages/EnglishWordTypeForeignWord";
 import ImagePickForeignList from "./pages/minigamePages/ImagePickForeignList";
 import ImageTypeForeignWord from "./pages/minigamePages/ImageTypeForeignWord";
+import ListenForeignWordPickEnglishList from "./pages/minigamePages/ListenForeignWordPickEnglishList";
+import ListenEnglishWordPickForeignList from "./pages/minigamePages/ListenEnglishWordPickForeignList";
+import ListenForeignWordPickForeignList from "./pages/minigamePages/ListenForeignWordPickForeignList";
 
 function App() {
     return (
@@ -20,6 +23,9 @@ function App() {
                 <Route path="/minigames/foreignWordTypeEnglishWord" element={<ForeignWordTypeEnglishWord />} />
                 <Route path="/minigames/englishWordTypeForeignWord" element={<EnglishWordTypeForeignWord />} />
                 <Route path="/minigames/imageTypeForeignWord" element={<ImageTypeForeignWord />} />
+                <Route path="/minigames/listenForeignWordPickForeignList" element={<ListenForeignWordPickForeignList />} />
+                <Route path="/minigames/listenForeignWordPickEnglishList" element={<ListenForeignWordPickEnglishList />} />
+                <Route path="/minigames/listenEnglishWordPickForeignList" element={<ListenEnglishWordPickForeignList />} />
 
                 <Route path="*" element={<NotFoundPage />} />
             </Routes>

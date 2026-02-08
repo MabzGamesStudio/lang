@@ -169,6 +169,29 @@ $wrong-color: #f44336;
     max-width: 16em;
 }
 
+.play-audio-button {
+    padding: 12px 20px;
+    font-size: 3rem;
+    border: 2px solid var(--surface);
+    background-color: var(--border);
+    color: var(--text);
+    border-radius: 8px;
+    transition: all 0.1s ease;
+    outline: none;
+    cursor: pointer;
+    user-select: none;
+}
+
+.play-audio-button:hover {
+    background-color: var(--surface);
+    border-color: var(--text);
+}
+
+.play-audio-button:active {
+    filter: brightness(1.5);
+}
+
+
 .extra-characters {
     display: flex;
     gap: 8px;
