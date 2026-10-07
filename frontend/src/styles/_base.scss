@@ -1,20 +1,92 @@
+@use 'variables' as *;
+
 *,
 *::before,
 *::after {
-    box-sizing: border-box;
+  box-sizing: border-box;
 }
 
 html,
 body {
-    margin: 0;
-    padding: 0;
-    background: var(--bg);
-    color: var(--text);
-    font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-    transition: background 0.2s ease, color 0.2s ease;
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  line-height: 1.45;
 }
 
 a {
-    color: inherit;
-    text-decoration: none;
+  color: var(--primary);
+  text-decoration: none;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+h1,
+h2,
+h3 {
+  line-height: 1.2;
+}
+
+h2 {
+  font-size: 1.2rem;
+  margin: 0 0 $space-md;
+}
+
+h3 {
+  font-size: 1rem;
+  margin: $space-md 0 $space-sm;
+}
+
+code {
+  background: var(--surface-2);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+}
+
+kbd {
+  font-family: inherit;
+  font-size: 0.75em;
+  padding: 0.05em 0.4em;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+}
+
+.muted {
+  color: var(--text-muted);
+}
+
+.small {
+  font-size: 0.85em;
+}
+
+.ipa {
+  color: var(--text-muted);
+  font-family: 'Charis SIL', 'Doulos SIL', 'Gentium Plus', serif;
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.splash {
+  display: grid;
+  place-items: center;
+  height: 100vh;
+}
+
+@each $phase, $color in $phases {
+  .phase-#{$phase} {
+    --phase: #{$color};
+  }
 }

@@ -1,52 +1,39 @@
-import { useEffect } from "react";
+import { useEffect, type RefObject } from 'react';
 
-interface ExtraCharactersInput {
-    characters: string[];
-    activeInputRef: any;
-    insertCharacter: (char: string) => void;
-}
+// One-click buttons for letters that are hard to type (ñ, é, ü...).
+// While the answer box is focused, digits 1-9/0 insert them.
+export default function ExtraCharacters({
+  characters,
+  inputRef,
+  onInsert,
+}: {
+  characters: string[];
+  inputRef: RefObject<HTMLInputElement | null>;
+  onInsert: (char: string) => void;
+}) {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (document.activeElement !== inputRef.current || event.ctrlKey || event.metaKey || event.altKey) return;
+      if (!/^[0-9]$/.test(event.key)) return;
+      const index = event.key === '0' ? 9 : Number(event.key) - 1;
+      const char = characters[index];
+      if (!char) return;
+      event.preventDefault();
+      onInsert(event.shiftKey ? char.toLocaleUpperCase() : char);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [characters, inputRef, onInsert]);
 
-export default function ExtraCharacters({ activeInputRef, characters, insertCharacter }: ExtraCharactersInput) {
-
-    useEffect(() => {
-        const handleKeyDown = (event: KeyboardEvent) => {
-            const isTargetFocused = document.activeElement === activeInputRef.current;
-
-            if (!isTargetFocused) {
-                return;
-            }
-
-            const keyNum = parseInt(event.key);
-            if (!isNaN(keyNum)) {
-                const index = keyNum === 0 ? 9 : keyNum - 1;
-
-                if (characters[index]) {
-                    event.preventDefault();
-                    insertCharacter(characters[index]);
-                }
-            }
-        };
-
-        window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [characters]);
-
-    return (
-
-        <div className="extra-characters">
-            {characters.map((char, index) => {
-                const displayDigit = index === 9 ? 0 : index + 1;
-                return (
-                    <button
-                        key={index}
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => insertCharacter(char)}
-                    >
-                        <sup>{displayDigit}</sup>
-                        <span>{char}</span>
-                    </button>
-                );
-            })}
-        </div>
-    );
+  if (characters.length === 0) return null;
+  return (
+    <div className="extra-characters">
+      {characters.slice(0, 10).map((char, index) => (
+        <button key={char} type="button" tabIndex={-1} onMouseDown={(event) => event.preventDefault()} onClick={() => onInsert(char)}>
+          <sup>{index === 9 ? 0 : index + 1}</sup>
+          <span>{char}</span>
+        </button>
+      ))}
+    </div>
+  );
 }
