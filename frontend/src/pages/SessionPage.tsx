@@ -12,11 +12,25 @@ import { BLOCK_BATCHES } from '../../../shared/scoring';
 import { splitGlossList } from '../../../shared/text';
 import type { BatchWord, NextResponse, Notice, SessionState } from '../../../shared/types';
 
-function MissingDefinitions({ langId, words, onDone }: { langId: string; words: BatchWord[]; onDone: () => void }) {
+function MissingDefinitions({
+  langId,
+  message,
+  words,
+  inline,
+  onDone,
+}: {
+  langId: string;
+  message: string;
+  words: BatchWord[];
+  inline: boolean;
+  onDone: () => void;
+}) {
   const { trackJob } = useApp();
   const run = useAction();
   const [drafts, setDrafts] = useState<Record<number, string>>({});
   const [busy, setBusy] = useState(false);
+  // Above a question the notice stays one line until opened.
+  const [open, setOpen] = useState(!inline);
 
   async function save() {
     setBusy(true);
@@ -28,12 +42,19 @@ function MissingDefinitions({ langId, words, onDone }: { langId: string; words: 
     onDone();
   }
 
+  if (!open) {
+    return (
+      <div className="notice missing compact">
+        <span>{message}</span>
+        <button className="button small" onClick={() => setOpen(true)}>
+          Add translations
+        </button>
+      </div>
+    );
+  }
   return (
     <div className="notice missing">
-      <p>
-        These words have no English translation yet. Type one, exclude the word, or let a service fetch them
-        (Configuration → Services).
-      </p>
+      <p>{inline ? `${message} Type a translation, exclude the word, or fetch translations automatically.` : message}</p>
       {words.map((word) => (
         <div key={word.id} className="row">
           <strong className="word">{word.display}</strong>
@@ -116,9 +137,9 @@ export default function SessionPage() {
   const onUpdate = useCallback((response: NextResponse) => setState(response.state), []);
 
   const renderNotice = useCallback(
-    (notice: Notice, retry: () => void) => {
+    (notice: Notice, retry: () => void, inline: boolean) => {
       if (notice.kind === 'missingDefinitions' && notice.words && language) {
-        return <MissingDefinitions langId={language.id} words={notice.words} onDone={retry} />;
+        return <MissingDefinitions langId={language.id} message={notice.message} words={notice.words} inline={inline} onDone={retry} />;
       }
       if (notice.kind === 'reviewsDone') {
         return (

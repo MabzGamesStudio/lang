@@ -7,6 +7,13 @@ const proxyConfigured = Boolean(
 );
 const dispatcher = proxyConfigured ? new EnvHttpProxyAgent() : undefined;
 
+// fetch() that goes through the configured proxy (for libraries that accept a
+// custom fetch, such as the Hugging Face client).
+export const proxyFetch: typeof fetch = (input, init) =>
+  dispatcher
+    ? (undiciFetch(input as Parameters<typeof undiciFetch>[0], { ...(init as object), dispatcher } as Parameters<typeof undiciFetch>[1]) as unknown as Promise<Response>)
+    : fetch(input, init);
+
 export const USER_AGENT = 'lang-learning-app/2.0 (local desktop app; https://github.com/mabzgamesstudio/lang)';
 
 export interface HttpOptions {

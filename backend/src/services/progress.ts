@@ -19,13 +19,13 @@ import {
 import {
   BATCH_SIZE,
   DAY_MS,
-  MAX_LEVEL,
   MAX_SRS_STAGE,
   batchOfRank,
   batchRankRange,
   blockOfBatch,
   blockRankRange,
   nextLevel,
+  requiredLevels,
   reviewIntervalMs,
 } from '../../../shared/scoring.js';
 import type {
@@ -33,6 +33,7 @@ import type {
   BatchWord,
   NextResponse,
   Notice,
+  ProgressionOrder,
   ProgressSummary,
   ResultsResponse,
   SessionMode,
@@ -72,16 +73,43 @@ function level(word: Learner | WordDbRow, phase: Phase): number {
   return levelsOf(word as WordDbRow)[phase];
 }
 
+// What Personal progress plays and how much practice mastery takes.
+export interface Rules {
+  games: GameDef[];
+  // Correct answers needed per phase (adjustable in settings).
+  required: Record<Phase, number>;
+  order: ProgressionOrder;
+}
+
+export function progressRules(settings: AppSettings): Rules {
+  return {
+    games: progressGames(settings),
+    required: requiredLevels(settings.learning),
+    order: settings.learning.progressionOrder === 'batch' ? 'batch' : 'phase',
+  };
+}
+
 function phaseApplicable(phase: Phase, word: Learner, games: GameDef[]): boolean {
   return games.some((game) => game.phase === phase && gameApplicable(game, word));
 }
 
-function phaseDone(phase: Phase, word: Learner, games: GameDef[]): boolean {
-  return !phaseApplicable(phase, word, games) || level(word, phase) >= MAX_LEVEL[phase];
+function phaseDone(phase: Phase, word: Learner, rules: Rules): boolean {
+  return !phaseApplicable(phase, word, rules.games) || level(word, phase) >= rules.required[phase];
 }
 
-function wordComplete(word: Learner, games: GameDef[]): boolean {
-  return ready(word) && PHASES.every((phase) => phaseDone(phase, word, games));
+function wordComplete(word: Learner, rules: Rules): boolean {
+  return ready(word) && PHASES.every((phase) => phaseDone(phase, word, rules));
+}
+
+// A word still being learnt that can be practised in this phase. Words with
+// missing data (no English translation) are skipped so they never hold up a batch.
+function needsPractice(word: Learner, phase: Phase, rules: Rules): boolean {
+  return (
+    word.srs_stage === 0 &&
+    ready(word) &&
+    phaseApplicable(phase, word, rules.games) &&
+    level(word, phase) < rules.required[phase]
+  );
 }
 
 function toBatchWord(word: Learner): BatchWord {
@@ -116,16 +144,17 @@ function completeReview(db: DB, word: Learner, now: number): void {
   ).run(stage, now + reviewIntervalMs(stage), word.id);
 }
 
-// At each repetition milestone every category is reset to 1 and has to be
-// brought back to mastery again.
-function startReview(db: DB, ids: number[], now: number): void {
+// At each repetition milestone every category is reset to 1 (0 when one
+// correct answer is enough) and has to be brought back to mastery again.
+function startReview(db: DB, ids: number[], now: number, required: Record<Phase, number>): void {
+  const reset = (phase: Phase) => Math.min(1, required[phase] - 1);
   const statement = db.prepare(
     `UPDATE words SET review_started_at = ?, review_errors = 0,
-       recognition_level = MIN(recognition_level, 1), recall_level = MIN(recall_level, 1),
-       recite_level = MIN(recite_level, 1), translate_level = MIN(translate_level, 1)
+       recognition_level = MIN(recognition_level, ?), recall_level = MIN(recall_level, ?),
+       recite_level = MIN(recite_level, ?), translate_level = MIN(translate_level, ?)
      WHERE id = ? AND review_started_at IS NULL`
   );
-  for (const id of ids) statement.run(now, id);
+  for (const id of ids) statement.run(now, reset('recognition'), reset('recall'), reset('recite'), reset('translate'), id);
 }
 
 // ---------------------------------------------------------------------------
@@ -142,10 +171,29 @@ function emptyState(mode: SessionMode): SessionState {
   return { mode, block: null, phase: null, batch: null, batchWords: [], newBatch: false, frontier: 0 };
 }
 
-// Learn mode: the first block (14 batches of 7 words) with unlearned words.
-// Every batch of the block goes through recognition, then recall, then recite,
-// then translate.
-export function learnState(db: DB, games: GameDef[]): EngineState {
+const COMPLETE_NOTICE: Notice = {
+  kind: 'complete',
+  message: 'Every word has been learned. Add more books to keep going, or review due words.',
+};
+
+function missingNotice(words: Learner[], blocking: boolean): Notice {
+  const n = words.length;
+  return {
+    kind: 'missingDefinitions',
+    message: blocking
+      ? `The next word${n === 1 ? ' has' : 's have'} no English translation yet. Add ${n === 1 ? 'it' : 'them'} here, exclude ${n === 1 ? 'it' : 'them'}, or let a service fetch translations (Configuration → Services).`
+      : `${n} word${n === 1 ? ' is' : 's are'} skipped in this batch until ${n === 1 ? 'it has' : 'they have'} an English translation.`,
+    words: words.map(toBatchWord),
+  };
+}
+
+// Learn mode. Words are learnt in batches of 7, in frequency order, and a
+// batch is never left until every word of it is mastered in the current phase
+// (only words with missing data are skipped).
+// - 'phase' order: every batch of the block (14 batches) goes through
+//   recognition, then every batch through recall, then recite, then translate.
+// - 'batch' order: each batch goes through all four phases before the next.
+export function learnState(db: DB, rules: Rules): EngineState {
   const total = (db.prepare(`SELECT COUNT(*) AS n FROM words WHERE active = 1 AND rank IS NOT NULL`).get() as { n: number }).n;
   if (total === 0) {
     return {
@@ -155,74 +203,97 @@ export function learnState(db: DB, games: GameDef[]): EngineState {
       notice: { kind: 'empty', message: 'This language has no words yet. Add a book or a word list in Configuration → Sources.' },
     };
   }
-  const first = (
-    db.prepare(`SELECT MIN(rank) AS rank FROM words WHERE active = 1 AND rank IS NOT NULL AND srs_stage = 0`).get() as {
-      rank: number | null;
-    }
-  ).rank;
-  if (first === null) {
-    return {
-      state: emptyState('learn'),
-      candidates: [],
-      batchWords: [],
-      notice: { kind: 'complete', message: 'Every word has been learned. Add more books to keep going, or review due words.' },
-    };
-  }
   const now = Date.now();
-  for (let block = blockOfBatch(batchOfRank(first)); block < 100_000; block++) {
-    const [low, high] = blockRankRange(block);
-    const words = loadLearners(db, `active = 1 AND rank BETWEEN ? AND ? ORDER BY rank`, low, high);
-    if (words.length === 0) break;
-    const complete = words.filter((w) => w.srs_stage === 0 && wordComplete(w, games));
-    if (complete.length) {
-      markLearned(db, complete.map((w) => w.id), now);
-      for (const word of complete) word.srs_stage = 1;
-    }
-    const pending = words.filter((w) => w.srs_stage === 0);
-    if (pending.length === 0) continue;
-    const blockEnd = words[words.length - 1].rank ?? high;
-    for (const phase of PHASES) {
-      const candidates = pending.filter(
-        (w) => !ready(w) || (phaseApplicable(phase, w, games) && level(w, phase) < MAX_LEVEL[phase])
-      );
-      if (candidates.length === 0) continue;
-      const batch = Math.min(...candidates.map((w) => batchOfRank(w.rank!)));
-      const batchWords = words.filter((w) => batchOfRank(w.rank!) === batch);
-      const notReady = batchWords.filter((w) => w.srs_stage === 0 && !ready(w));
-      const state: SessionState = {
-        mode: 'learn',
-        block,
-        phase,
-        batch,
-        batchWords: batchWords.map(toBatchWord),
-        newBatch: phase === 'recognition' && batchWords.every((w) => w.recognition_level === 0),
-        frontier: phase === 'recognition' ? batch * BATCH_SIZE : blockEnd,
-      };
+  const first = (
+    db
+      .prepare(`SELECT MIN(rank) AS rank FROM words WHERE active = 1 AND rank IS NOT NULL AND srs_stage = 0 AND english IS NOT NULL`)
+      .get() as { rank: number | null }
+  ).rank;
+  if (first !== null) {
+    for (let block = blockOfBatch(batchOfRank(first)); block < 100_000; block++) {
+      const [low, high] = blockRankRange(block);
+      const words = loadLearners(db, `active = 1 AND rank BETWEEN ? AND ? ORDER BY rank`, low, high);
+      if (words.length === 0) break;
+      const complete = words.filter((w) => w.srs_stage === 0 && wordComplete(w, rules));
+      if (complete.length) {
+        markLearned(db, complete.map((w) => w.id), now);
+        for (const word of complete) word.srs_stage = 1;
+      }
+      const position = nextPosition(words, rules);
+      if (!position) continue;
+      const blockEnd = words[words.length - 1].rank ?? high;
+      const batchWords = words.filter((w) => batchOfRank(w.rank!) === position.batch);
+      const missing = batchWords.filter((w) => w.srs_stage === 0 && !ready(w));
+      const learning = batchWords.filter((w) => w.srs_stage === 0 && ready(w));
       return {
-        state,
+        state: {
+          mode: 'learn',
+          block,
+          phase: position.phase,
+          batch: position.batch,
+          batchWords: batchWords.map(toBatchWord),
+          newBatch: position.phase === 'recognition' && learning.every((w) => w.recognition_level === 0),
+          // Words introduced so far: scored in sentences and used as distractors.
+          frontier: rules.order === 'batch' || position.phase === 'recognition' ? position.batch * BATCH_SIZE : blockEnd,
+        },
         batchWords,
-        candidates: candidates.filter((w) => batchOfRank(w.rank!) === batch && ready(w)),
-        notice: notReady.length
-          ? {
-              kind: 'missingDefinitions',
-              message: `${notReady.length} word${notReady.length === 1 ? '' : 's'} in this batch ha${notReady.length === 1 ? 's' : 've'} no English translation yet.`,
-              words: notReady.map(toBatchWord),
-            }
-          : null,
+        candidates: batchWords.filter((w) => needsPractice(w, position.phase, rules)),
+        notice: missing.length ? missingNotice(missing, false) : null,
       };
     }
   }
+  // Nothing can be practised: the only words left have no translation yet.
+  const missingRank = (
+    db
+      .prepare(`SELECT MIN(rank) AS rank FROM words WHERE active = 1 AND rank IS NOT NULL AND srs_stage = 0 AND english IS NULL`)
+      .get() as { rank: number | null }
+  ).rank;
+  if (missingRank === null) return { state: emptyState('learn'), candidates: [], batchWords: [], notice: COMPLETE_NOTICE };
+  const batch = batchOfRank(missingRank);
+  const [low, high] = batchRankRange(batch);
+  const batchWords = loadLearners(db, `active = 1 AND rank BETWEEN ? AND ? ORDER BY rank`, low, high);
   return {
-    state: emptyState('learn'),
+    state: {
+      mode: 'learn',
+      block: blockOfBatch(batch),
+      phase: 'recognition',
+      batch,
+      batchWords: batchWords.map(toBatchWord),
+      newBatch: false,
+      frontier: high,
+    },
+    batchWords,
     candidates: [],
-    batchWords: [],
-    notice: { kind: 'complete', message: 'Every word has been learned. Add more books to keep going, or review due words.' },
+    notice: missingNotice(
+      batchWords.filter((w) => w.srs_stage === 0 && !ready(w)),
+      true
+    ),
   };
+}
+
+// The batch and phase to practise in a block, or null when nothing is left.
+function nextPosition(words: Learner[], rules: Rules): { batch: number; phase: Phase } | null {
+  const pending = words.filter((w) => w.srs_stage === 0 && ready(w));
+  if (rules.order === 'batch') {
+    const batches = [...new Set(pending.map((w) => batchOfRank(w.rank!)))].sort((a, b) => a - b);
+    for (const batch of batches) {
+      const inBatch = pending.filter((w) => batchOfRank(w.rank!) === batch);
+      for (const phase of PHASES) {
+        if (inBatch.some((w) => needsPractice(w, phase, rules))) return { batch, phase };
+      }
+    }
+    return null;
+  }
+  for (const phase of PHASES) {
+    const candidates = pending.filter((w) => needsPractice(w, phase, rules));
+    if (candidates.length) return { phase, batch: Math.min(...candidates.map((w) => batchOfRank(w.rank!))) };
+  }
+  return null;
 }
 
 // Review mode: words whose repetition milestone is due, 7 at a time, in
 // frequency order. A review batch is finished before the next one starts.
-export function reviewState(db: DB, games: GameDef[]): EngineState {
+export function reviewState(db: DB, rules: Rules): EngineState {
   const now = Date.now();
   const frontier =
     (db.prepare(`SELECT MAX(rank) AS rank FROM words WHERE active = 1 AND srs_stage > 0`).get() as { rank: number | null })
@@ -246,11 +317,13 @@ export function reviewState(db: DB, games: GameDef[]): EngineState {
           notice: { kind: 'reviewsDone', message: 'No reviews are due right now.', nextDueAt: next.at },
         };
       }
-      startReview(db, due.map((w) => w.id), now);
+      startReview(db, due.map((w) => w.id), now, rules.required);
       batch = loadLearners(db, `id IN (SELECT value FROM json_each(?)) ORDER BY rank`, JSON.stringify(due.map((w) => w.id)));
     }
     for (const phase of PHASES) {
-      const candidates = batch.filter((w) => ready(w) && phaseApplicable(phase, w, games) && level(w, phase) < MAX_LEVEL[phase]);
+      const candidates = batch.filter(
+        (w) => ready(w) && phaseApplicable(phase, w, rules.games) && level(w, phase) < rules.required[phase]
+      );
       if (candidates.length === 0) continue;
       return {
         state: {
@@ -281,7 +354,7 @@ function chooseTarget(
   batchWords: Learner[],
   phase: Phase,
   recent: number[],
-  games: GameDef[]
+  rules: Rules
 ): { word: Learner; filler: boolean } | null {
   if (candidates.length === 0) return null;
   // Space repetitions inside the session: avoid the words just asked.
@@ -289,13 +362,13 @@ function chooseTarget(
   let pool = candidates.filter((w) => !avoid.has(w.id));
   if (candidates.length === 1 && recent[0] === candidates[0].id) {
     const fillers = batchWords.filter(
-      (w) => w.id !== candidates[0].id && ready(w) && phaseApplicable(phase, w, games)
+      (w) => w.id !== candidates[0].id && ready(w) && phaseApplicable(phase, w, rules.games)
     );
     const filler = pickRandom(fillers);
     if (filler) return { word: filler, filler: true };
   }
   if (pool.length === 0) pool = candidates;
-  const word = pickWeighted(pool, (w) => MAX_LEVEL[phase] - level(w, phase) + 1);
+  const word = pickWeighted(pool, (w) => Math.max(1, rules.required[phase] - level(w, phase) + 1));
   return word ? { word, filler: false } : null;
 }
 
@@ -328,9 +401,10 @@ export function sessionNext(langId: string, request: NextRequest): NextResponse 
   const db = languageDb(langId);
   const config = getLanguageConfig(db);
   const settings = getSettings();
-  const games = progressGames(settings);
+  const rules = progressRules(settings);
+  const games = rules.games;
   if (games.length === 0) throw new HttpError(400, 'Every minigame is disabled in Configuration → Learning.');
-  const engine = request.mode === 'review' ? reviewState(db, games) : learnState(db, games);
+  const engine = request.mode === 'review' ? reviewState(db, rules) : learnState(db, rules);
   if (!engine.state.phase || engine.candidates.length === 0) {
     return { state: engine.state, question: null, notice: engine.notice };
   }
@@ -350,7 +424,7 @@ export function sessionNext(langId: string, request: NextRequest): NextResponse 
       engine.batchWords.filter((w) => !tried.has(w.id)),
       engine.state.phase,
       recent,
-      games
+      rules
     );
     if (!choice) break;
     const question = makeQuestion(engine.state.phase, choice.word, games, ctx, request.lastGameId);
@@ -411,11 +485,12 @@ export function freePlayNext(
     return { state, question: null, notice: { kind: 'noQuestion', message: reason } };
   }
   const ctx: BuildContext = { db, langId, config, settings, frontier: high, batchWords: pool };
+  const required = requiredLevels(settings.learning);
   const avoid = new Set(request.recent.slice(0, Math.min(2, candidates.length - 1)));
   const ordered = [
     pickWeighted(
       candidates.filter((w) => !avoid.has(w.id)),
-      (w) => MAX_LEVEL[game.phase] - level(w, game.phase) + 1
+      (w) => Math.max(1, required[game.phase] - level(w, game.phase) + 1)
     ),
     ...shuffle(candidates),
   ].filter((w): w is Learner => Boolean(w));
@@ -431,7 +506,7 @@ export function freePlayNext(
 
 export function applyResults(langId: string, results: WordResult[]): ResultsResponse {
   const db = languageDb(langId);
-  const games = progressGames(getSettings());
+  const rules = progressRules(getSettings());
   const now = Date.now();
   const learned: number[] = [];
   const reviewed: number[] = [];
@@ -445,7 +520,7 @@ export function applyResults(langId: string, results: WordResult[]): ResultsResp
       const row = db.prepare(`SELECT ${WORD_COLUMNS} FROM words WHERE id = ?`).get(result.wordId) as WordDbRow | undefined;
       if (!row) continue;
       const column = result.phase;
-      const updated = nextLevel(result.phase, levelsOf(row)[column], result.correct);
+      const updated = nextLevel(result.phase, levelsOf(row)[column], result.correct, rules.required[result.phase]);
       db.prepare(
         `UPDATE words SET ${column}_level = ?, ${column}_${result.correct ? 'correct' : 'wrong'} = ${column}_${result.correct ? 'correct' : 'wrong'} + 1,
            first_seen_at = COALESCE(first_seen_at, ?), last_seen_at = ?,
@@ -464,7 +539,7 @@ export function applyResults(langId: string, results: WordResult[]): ResultsResp
     for (const id of touched) {
       const word = toLearner(db.prepare(`SELECT ${WORD_COLUMNS} FROM words WHERE id = ?`).get(id) as WordDbRow);
       levels[id] = levelsOf(word);
-      if (!word.active || !wordComplete(word, games)) continue;
+      if (!word.active || !wordComplete(word, rules)) continue;
       if (word.srs_stage === 0) {
         markLearned(db, [id], now);
         learned.push(id);
@@ -482,7 +557,8 @@ export function applyResults(langId: string, results: WordResult[]): ResultsResp
 
 export function progressSummary(langId: string): ProgressSummary {
   const db = languageDb(langId);
-  const games = progressGames(getSettings());
+  const rules = progressRules(getSettings());
+  const games = rules.games;
   const now = Date.now();
   const endOfToday = new Date();
   endOfToday.setHours(23, 59, 59, 999);
@@ -503,12 +579,12 @@ export function progressSummary(langId: string): ProgressSummary {
     'learn' | 'learnNotice' | 'phaseLevels' | 'srsStages' | 'upcoming' | 'activity' | 'streak' | 'blocks'
   >;
 
-  const learn = learnState(db, games);
+  const learn = learnState(db, rules);
   const currentBlock = learn.state.block ?? 1;
   const [, scopeEnd] = blockRankRange(currentBlock + 1);
   const scope = loadLearners(db, `active = 1 AND rank BETWEEN 1 AND ? ORDER BY rank`, scopeEnd);
 
-  const phaseLevels = Object.fromEntries(PHASES.map((phase) => [phase, new Array<number>(MAX_LEVEL[phase] + 1).fill(0)])) as Record<
+  const phaseLevels = Object.fromEntries(PHASES.map((phase) => [phase, new Array<number>(rules.required[phase] + 1).fill(0)])) as Record<
     Phase,
     number[]
   >;
@@ -532,8 +608,8 @@ export function progressSummary(langId: string): ProgressSummary {
       // Words a phase does not apply to (e.g. no translated sentence yet) are not counted.
       if (ready(word) && !phaseApplicable(phase, word, games)) continue;
       entry.applicable[phase]++;
-      if (word.srs_stage > 0 || (ready(word) && level(word, phase) >= MAX_LEVEL[phase])) entry.complete[phase]++;
-      if (block <= currentBlock) phaseLevels[phase][Math.min(level(word, phase), MAX_LEVEL[phase])]++;
+      if (word.srs_stage > 0 || (ready(word) && level(word, phase) >= rules.required[phase])) entry.complete[phase]++;
+      if (block <= currentBlock) phaseLevels[phase][Math.min(level(word, phase), rules.required[phase])]++;
     }
   }
 
@@ -596,8 +672,7 @@ export function progressSummary(langId: string): ProgressSummary {
 // Words of the current learning block (for automatic preparation).
 export function currentBlockWordIds(langId: string): number[] {
   const db = languageDb(langId);
-  const games = progressGames(getSettings());
-  const { state } = learnState(db, games);
+  const { state } = learnState(db, progressRules(getSettings()));
   if (!state.block) return [];
   const [low, high] = blockRankRange(state.block);
   return (db.prepare(`SELECT id FROM words WHERE active = 1 AND rank BETWEEN ? AND ? ORDER BY rank`).all(low, high) as {

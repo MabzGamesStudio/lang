@@ -36,15 +36,25 @@ export async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T, in
 // ---------------------------------------------------------------------------
 // LLM (Google Colab open-source model, OpenAI-compatible API or Anthropic)
 
-interface LlmDefinition {
-  word?: string;
-  english?: unknown;
-  pos?: unknown;
-  ipa?: unknown;
+type LlmDefinition = { word?: string; english?: unknown; pos?: unknown } & Record<string, unknown>;
+
+// The most useful pronunciation notation for learners of the language.
+export function pronunciationSpec(config: LanguageConfig): { key: string; description: string } {
+  switch (config.code.toLowerCase().split('-')[0]) {
+    case 'zh':
+      return { key: 'pinyin', description: 'pronunciation in Hanyu Pinyin with tone marks, syllables separated by spaces (e.g. "xué shēng")' };
+    case 'ja':
+      return { key: 'reading', description: 'reading in hiragana (e.g. "がくせい")' };
+    case 'ko':
+      return { key: 'romanization', description: 'Revised Romanization (e.g. "hakseng")' };
+    default:
+      return { key: 'ipa', description: 'pronunciation in IPA, without slashes' };
+  }
 }
 
 async function defineWithLlm(words: WordToDefine[], config: LanguageConfig): Promise<Map<number, Definition>> {
   const list = words.map((w) => w.word);
+  const spec = pronunciationSpec(config);
   const reply = await chat(
     [
       {
@@ -56,8 +66,8 @@ async function defineWithLlm(words: WordToDefine[], config: LanguageConfig): Pro
         content: `For each ${config.name} word below (taken from a frequency list of real texts, so it may be an inflected form), give:
 - "english": 1-4 short English translations, most common meaning first. Translate the form itself (a past tense verb → "said", a plural noun → plural). Use "to ..." only for infinitives.
 - "pos": part of speech (noun, verb, adjective, adverb, pronoun, preposition, conjunction, determiner, interjection, numeral or other)
-- "ipa": pronunciation in IPA, without slashes
-Return only JSON: {"items":[{"word":"...","english":["..."],"pos":"...","ipa":"..."}]} with exactly one item per word, in the same order.
+- "${spec.key}": ${spec.description}
+Return only JSON: {"items":[{"word":"...","english":["..."],"pos":"...","${spec.key}":"..."}]} with exactly one item per word, in the same order.
 Words: ${JSON.stringify(list)}`,
       },
     ],
@@ -77,7 +87,8 @@ Words: ${JSON.stringify(list)}`,
       : typeof item.english === 'string'
         ? splitGlossList(item.english)
         : [];
-    const ipa = typeof item.ipa === 'string' ? item.ipa.replace(/^[/[]|[/\]]$/g, '').trim() : '';
+    const rawPronunciation = [item[spec.key], item.pronunciation, item.ipa].find((value) => typeof value === 'string');
+    const ipa = typeof rawPronunciation === 'string' ? rawPronunciation.replace(/^[/[]|[/\]]$/g, '').trim() : '';
     result.set(word.id, {
       english: english.map((gloss) => gloss.trim()).filter(Boolean),
       pronunciation: ipa || null,

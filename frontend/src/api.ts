@@ -2,7 +2,9 @@ import type { GameId } from '../../shared/games';
 import type {
   AppSettings,
   GutenbergBook,
+  HubBackup,
   ImageRow,
+  InputIndex,
   JobInfo,
   JudgeResponse,
   LanguageConfig,
@@ -125,6 +127,8 @@ export const api = {
     `/api${L(id)}/colab-job${query({ type, limit })}`,
   colabResults: (id: string, results: unknown) => post<{ saved: number }>(`${L(id)}/colab-results`, results),
 
+  inputIndex: (id: string) => get<InputIndex>(`${L(id)}/input-index`),
+
   // Learning
   sessionNext: (id: string, body: { mode: 'learn' | 'review'; recent: number[]; lastGameId: GameId | null }) =>
     post<NextResponse>(`${L(id)}/session/next`, body),
@@ -163,6 +167,9 @@ export const api = {
   importLanguage: (file: File) => request<LanguageSummary>('POST', '/import/language', undefined, { data: file, type: 'application/zip' }),
   exportEnglishUrl: () => '/api/english/export',
   importEnglish: (file: File) => request<{ ok: true }>('POST', '/import/english', undefined, { data: file, type: 'application/zip' }),
+  hubUpload: (target: { kind: 'language'; lang: string } | { kind: 'english' }) => post<JobInfo>('/huggingface/upload', target),
+  hubBackups: () => get<{ repo: string; url: string; backups: HubBackup[] }>('/huggingface/backups'),
+  hubRestore: (path: string) => post<JobInfo>('/huggingface/restore', { path }),
   legacy: () => get<{ available: boolean; imported: boolean }>('/legacy'),
   importLegacy: () => post<{ message: string }>('/legacy/import'),
 };

@@ -7,7 +7,7 @@ import { formatRelative } from '../lib/hooks';
 import LevelDots from '../components/LevelDots';
 import { SessionHeader } from './SessionPage';
 import { PHASES, PHASE_LABELS } from '../../../shared/games';
-import { BLOCK_SIZE, LEVEL_NAMES, REVIEW_INTERVALS_DAYS, describeInterval } from '../../../shared/scoring';
+import { BLOCK_SIZE, REVIEW_INTERVALS_DAYS, describeInterval, levelNames } from '../../../shared/scoring';
 import type { ProgressSummary } from '../../../shared/types';
 
 function Bars({ values, labels, className }: { values: number[]; labels: string[]; className?: string }) {
@@ -125,8 +125,11 @@ export default function ProgressPage() {
                 </div>
               )}
               <p className="muted">
-                Each block is {BLOCK_SIZE} words (14 batches of 7). All batches go through recognition, then recall, then
-                recite, then translate. Words without sentences skip the sentence phases until sentences are added.
+                {settings.learning.progressionOrder === 'batch'
+                  ? 'Each batch of 7 words goes through recognition, recall, recite and translate before the next batch starts.'
+                  : `Each block is ${BLOCK_SIZE} words (14 batches of 7). All batches go through recognition, then recall, then recite, then translate.`}{' '}
+                A batch is only left once every word in it is mastered; words without a translation are skipped, and words
+                without sentences skip the sentence phases.
               </p>
             </>
           ) : (
@@ -160,7 +163,12 @@ export default function ProgressPage() {
           {PHASES.map((phase) => (
             <div key={phase} className={`phase-${phase}`}>
               <h3>{PHASE_LABELS[phase]}</h3>
-              <Bars values={summary.phaseLevels[phase]} labels={LEVEL_NAMES[phase].map((name) => name.replace(/ (recognition|recall|sentence integration|translation)$/, ''))} />
+              <Bars
+                values={summary.phaseLevels[phase]}
+                labels={levelNames(phase, summary.phaseLevels[phase].length - 1).map((name) =>
+                  name.replace(/ (recognition|recall|sentence integration|translation)$/, '')
+                )}
+              />
             </div>
           ))}
         </div>

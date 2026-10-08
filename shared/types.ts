@@ -3,6 +3,13 @@ import type { GameId, Phase, PromptMode, ResponseMode, Side } from './games.js';
 // ---------------------------------------------------------------------------
 // Languages, words, sentences and sources
 
+// How answers in the foreign language are typed.
+export type InputMethod = 'auto' | 'system' | 'letters' | 'phonetic' | 'pinyin' | 'japanese' | 'hangul';
+
+// How sources combine into word frequencies: every source counts the same
+// (per million words), or bigger texts count more (pooled word counts).
+export type SourceWeighting = 'equal' | 'size';
+
 export interface LanguageConfig {
   id: string;
   name: string;
@@ -10,6 +17,8 @@ export interface LanguageConfig {
   locale: string;
   rtl: boolean;
   detectProperNouns: boolean;
+  inputMethod: InputMethod;
+  sourceWeighting: SourceWeighting;
   extraCharacters: string[]; // empty = derived automatically from the corpus
   minSentenceWords: number;
   maxSentenceWords: number;
@@ -213,7 +222,15 @@ export type TranslationProvider = 'llm' | 'deepl' | 'google' | 'libretranslate';
 export type TtsProvider = 'browser' | 'colab' | 'openai' | 'google';
 export type SttProvider = 'browser' | 'colab' | 'openai';
 
+export type BatchPreviewMode = 'every' | 'new' | 'off';
+export type ProgressionOrder = 'phase' | 'batch';
+
 export interface LearningSettings {
+  // Correct answers needed to master a word in each phase.
+  requiredCorrect: Record<Phase, number>;
+  // 'phase': all batches of a block go through recognition, then recall...
+  // 'batch': each batch goes through all four phases before the next batch.
+  progressionOrder: ProgressionOrder;
   disableSpeaking: boolean;
   disableListening: boolean;
   disabledGames: GameId[];
@@ -224,7 +241,9 @@ export interface LearningSettings {
   speechThreshold: number;
   autoAdvanceMs: number;
   retypeOnMistake: boolean;
-  batchPreview: boolean;
+  // Stay on the feedback when a typed answer was accepted but not spelled exactly.
+  pauseOnInexact: boolean;
+  batchPreview: BatchPreviewMode;
   memorizeHide: boolean;
   playAudioOnFeedback: boolean;
   pomodoro: boolean;
@@ -262,6 +281,7 @@ export interface AppSettings {
     provider: SttProvider;
     openai: { baseUrl: string; apiKey: string; model: string };
   };
+  huggingface: { token: string; repo: string; private: boolean; hubUrl: string };
   learning: LearningSettings;
 }
 
@@ -302,6 +322,19 @@ export interface GutenbergBook {
   downloads: number;
   textUrl: string | null;
   imported: boolean;
+}
+
+// Dictionary used by the Chinese (pinyin) and Japanese (romaji) input methods:
+// [word, key, frequency rank]. Pinyin keys separate syllables with "'".
+export interface InputIndex {
+  method: 'pinyin' | 'japanese' | null;
+  entries: [string, string, number][];
+}
+
+export interface HubBackup {
+  path: string;
+  size: number;
+  updatedAt: string | null;
 }
 
 export interface JudgeResponse {

@@ -10,7 +10,11 @@ import {
 } from '../db/connection.js';
 import { readMeta, writeMeta } from '../db/schema.js';
 import { findCatalogLanguage, slugify } from '../../../shared/languages.js';
-import type { LanguageConfig, LanguageSummary } from '../../../shared/types.js';
+import type { InputMethod, LanguageConfig, LanguageSummary } from '../../../shared/types.js';
+
+const INPUT_METHODS: InputMethod[] = ['auto', 'system', 'letters', 'phonetic', 'pinyin', 'japanese', 'hangul'];
+// Scripts with thousands of characters are typed with an input method instead of buttons.
+const LOGOGRAPHIC = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
 
 export function defaultLanguageConfig(input: Partial<LanguageConfig> & { name: string }): LanguageConfig {
   const catalog = findCatalogLanguage(input.code || input.name);
@@ -23,6 +27,8 @@ export function defaultLanguageConfig(input: Partial<LanguageConfig> & { name: s
     locale: (input.locale || catalog?.locale || input.code || '').trim(),
     rtl: input.rtl ?? catalog?.rtl ?? false,
     detectProperNouns: input.detectProperNouns ?? !catalog?.capitalizedNouns,
+    inputMethod: INPUT_METHODS.includes(input.inputMethod as InputMethod) ? (input.inputMethod as InputMethod) : 'auto',
+    sourceWeighting: input.sourceWeighting === 'size' ? 'size' : 'equal',
     extraCharacters: input.extraCharacters ?? [],
     minSentenceWords: input.minSentenceWords ?? 3,
     maxSentenceWords: input.maxSentenceWords ?? 20,
@@ -46,8 +52,9 @@ function saveConfig(db: DB, config: LanguageConfig): void {
   writeMeta(db, 'config', JSON.stringify(config));
 }
 
-// Accented / special letters used by the language, most frequent first.
-// Shown as one-click buttons while typing answers.
+// Letters shown as one-click buttons while typing answers, most frequent
+// first: the accented / special letters of Latin-script languages, or the
+// whole alphabet of other scripts (Cyrillic, Greek, Arabic, Hebrew, Thai...).
 export function autoCharacters(db: DB): string[] {
   const rows = db
     .prepare(`SELECT word, count FROM words WHERE active = 1 AND rank IS NOT NULL ORDER BY rank LIMIT 5000`)
@@ -57,7 +64,7 @@ export function autoCharacters(db: DB): string[] {
   let other = 0;
   for (const { word, count } of rows) {
     for (const char of word) {
-      if (!/\p{L}/u.test(char)) continue;
+      if (!/[\p{L}\p{M}]/u.test(char)) continue;
       if (/[a-z]/.test(char)) {
         ascii += count;
       } else {
@@ -66,12 +73,10 @@ export function autoCharacters(db: DB): string[] {
       }
     }
   }
-  // Non-Latin scripts are typed with the system keyboard instead.
-  if (other > ascii) return [];
-  return [...counts.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 10)
-    .map(([char]) => char);
+  const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([char]) => char);
+  if (other <= ascii) return ranked.slice(0, 10);
+  if (ranked.some((char) => LOGOGRAPHIC.test(char))) return [];
+  return ranked.slice(0, 80);
 }
 
 export function languageSummary(id: string): LanguageSummary {
@@ -134,6 +139,8 @@ export function updateLanguage(id: string, patch: Partial<LanguageConfig>): Lang
     id: current.id,
     createdAt: current.createdAt,
   };
+  next.inputMethod = INPUT_METHODS.includes(next.inputMethod) ? next.inputMethod : 'auto';
+  next.sourceWeighting = next.sourceWeighting === 'size' ? 'size' : 'equal';
   next.minSentenceWords = Math.max(1, Math.min(50, Math.round(next.minSentenceWords)));
   next.maxSentenceWords = Math.max(next.minSentenceWords, Math.min(80, Math.round(next.maxSentenceWords)));
   saveConfig(db, next);

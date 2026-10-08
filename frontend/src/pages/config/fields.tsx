@@ -3,7 +3,7 @@ import { useApp } from '../../state/AppContext';
 import type { AppSettings } from '../../../../shared/types';
 
 // Local copy of the settings that is saved automatically shortly after edits.
-export function useSettingsDraft(): [AppSettings | null, (mutate: (draft: AppSettings) => void) => void] {
+export function useSettingsDraft(): [AppSettings | null, (mutate: (draft: AppSettings) => void) => void, () => Promise<void>] {
   const { settings, saveSettings } = useApp();
   const [draft, setDraft] = useState<AppSettings | null>(settings);
   const timer = useRef<number | undefined>(undefined);
@@ -38,7 +38,14 @@ export function useSettingsDraft(): [AppSettings | null, (mutate: (draft: AppSet
       return next;
     });
   };
-  return [draft, update];
+  // Saves pending edits now (before an action that needs them on the server).
+  const flush = async () => {
+    if (timer.current === undefined || !latest.current) return;
+    window.clearTimeout(timer.current);
+    timer.current = undefined;
+    await saveSettings(latest.current);
+  };
+  return [draft, update, flush];
 }
 
 export function Field({ label, hint, children }: { label: ReactNode; hint?: ReactNode; children: ReactNode }) {

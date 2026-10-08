@@ -139,6 +139,8 @@ export async function importTopGutenbergBooks(langId: string, count: number, ctx
 // ---------------------------------------------------------------------------
 // Word lists (CSV): word, english, count/rank, pronunciation, part of speech
 
+const NO_SPACE_SCRIPT = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}]/u;
+
 const COLUMN_ALIASES: Record<string, string[]> = {
   word: ['word', 'foreign', 'foreign_value', 'term', 'lemma', 'token'],
   english: ['english', 'english_value', 'translation', 'meaning', 'definition', 'gloss'],
@@ -184,8 +186,12 @@ export async function importWordList(
   dataRows.forEach((row, index) => {
     const raw = (row[columns.word] ?? '').trim();
     const parts = [...segmenter.segment(raw)].filter((part) => part.isWordLike);
-    if (parts.length !== 1) return;
-    const word = normalizeWord(parts[0].segment, config.locale);
+    let surface: string | null = parts.length === 1 ? parts[0].segment : null;
+    // Scripts written without spaces: a list entry like 一模一样 is one word
+    // even if the segmenter would split it.
+    if (parts.length > 1 && !/\s/.test(raw) && NO_SPACE_SCRIPT.test(raw)) surface = parts.map((part) => part.segment).join('');
+    if (!surface) return;
+    const word = normalizeWord(surface, config.locale);
     if (!word) return;
     const english = columns.english !== undefined ? splitGlossList(row[columns.english] ?? '') : [];
     const countValue = columns.count !== undefined ? Number(row[columns.count]) : NaN;

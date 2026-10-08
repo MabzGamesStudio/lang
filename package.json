@@ -18,9 +18,11 @@
     "package": "npm run build && electron-packager . Lang --overwrite --ignore=^/frontend/src --ignore=^/frontend/node_modules --ignore=^/langData --ignore=^/tests --ignore=^/ipynb"
   },
   "dependencies": {
+    "@huggingface/hub": "^2.17.6",
     "better-sqlite3": "^12.6.0",
     "express": "^5.2.1",
     "jszip": "^3.10.1",
+    "pinyin-pro": "^3.29.4",
     "undici": "^7.16.0"
   },
   "devDependencies": {

@@ -4,6 +4,8 @@ import { useAction, useApp } from '../../state/AppContext';
 import GameIcons from '../../components/GameIcons';
 import { Field, NumberInput, Section, Toggle, useSettingsDraft } from './fields';
 import { PHASES, PHASE_LABELS, gamesForPhase, isListeningGame, isSpeakingGame } from '../../../../shared/games';
+import { MAX_LEVEL, MAX_REQUIRED_CORRECT, requiredLevels } from '../../../../shared/scoring';
+import type { BatchPreviewMode, ProgressionOrder } from '../../../../shared/types';
 
 export default function LearningTab() {
   const { language, refreshLanguages } = useApp();
@@ -11,9 +13,53 @@ export default function LearningTab() {
   const [draft, update] = useSettingsDraft();
   if (!draft) return null;
   const learning = draft.learning;
+  const required = requiredLevels(learning);
 
   return (
     <>
+      <Section
+        title="Mastery and order"
+        description="How many correct answers make a word mastered in each phase (a mistake takes it back down), and in which order batches and phases are practised."
+      >
+        <div className="form-grid">
+          {PHASES.map((phase) => (
+            <Field key={phase} label={`${PHASE_LABELS[phase]}: correct answers`} hint={`Default ${MAX_LEVEL[phase]}`}>
+              <NumberInput
+                value={required[phase]}
+                min={1}
+                max={MAX_REQUIRED_CORRECT}
+                onChange={(value) => update((s) => void (s.learning.requiredCorrect = { ...requiredLevels(s.learning), [phase]: value }))}
+              />
+            </Field>
+          ))}
+        </div>
+        <div className="form-grid">
+          <Field label="Order">
+            <select
+              value={learning.progressionOrder}
+              onChange={(event) => update((s) => void (s.learning.progressionOrder = event.target.value as ProgressionOrder))}
+            >
+              <option value="phase">Phase by phase (every batch of the block per phase)</option>
+              <option value="batch">Batch by batch (all four phases per batch)</option>
+            </select>
+          </Field>
+          <Field label="Show the batch's words before quizzing">
+            <select
+              value={learning.batchPreview}
+              onChange={(event) => update((s) => void (s.learning.batchPreview = event.target.value as BatchPreviewMode))}
+            >
+              <option value="every">Before every batch and phase</option>
+              <option value="new">Only for new words</option>
+              <option value="off">Never</option>
+            </select>
+          </Field>
+        </div>
+        <p className="muted">
+          A batch is never left until all of its words are mastered in the current phase. Words without an English translation are
+          skipped until they get one.
+        </p>
+      </Section>
+
       <Section title="Personal progress minigames" description="Personal progress rotates through every enabled minigame of the current phase, so each word is seen, heard, typed and spoken.">
         <div className="row">
           <Toggle checked={!learning.disableSpeaking} onChange={(value) => update((s) => void (s.learning.disableSpeaking = !value))}>
@@ -82,6 +128,10 @@ export default function LearningTab() {
           <Toggle checked={learning.retypeOnMistake} onChange={(value) => update((s) => void (s.learning.retypeOnMistake = value))}>
             After a mistake, type the correct answer once before continuing
           </Toggle>
+          <Toggle checked={learning.pauseOnInexact} onChange={(value) => update((s) => void (s.learning.pauseOnInexact = value))}>
+            When a typed answer is accepted but not spelled exactly (accents, typos, synonyms, close sentences), stay on it
+            instead of moving on automatically
+          </Toggle>
           <Toggle checked={learning.memorizeHide} onChange={(value) => update((s) => void (s.learning.memorizeHide = value))}>
             Recite from memory: hide the sentence before answering
           </Toggle>
@@ -101,9 +151,6 @@ export default function LearningTab() {
           </Field>
         </div>
         <div className="stack">
-          <Toggle checked={learning.batchPreview} onChange={(value) => update((s) => void (s.learning.batchPreview = value))}>
-            Show the 7 new words before a new batch starts
-          </Toggle>
           <Toggle checked={learning.playAudioOnFeedback} onChange={(value) => update((s) => void (s.learning.playAudioOnFeedback = value))}>
             Play the correct pronunciation after a mistake
           </Toggle>

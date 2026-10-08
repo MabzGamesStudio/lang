@@ -8,7 +8,7 @@ import MinigameRunner from '../components/minigame/MinigameRunner';
 import LevelDots from '../components/LevelDots';
 import GameIcons from '../components/GameIcons';
 import { GAMES_BY_ID, isGameId } from '../../../shared/games';
-import { BATCH_SIZE, MAX_LEVEL } from '../../../shared/scoring';
+import { BATCH_SIZE, requiredLevels } from '../../../shared/scoring';
 import type { BatchWord, NextResponse } from '../../../shared/types';
 
 // Free play: one minigame, one batch of 7 words (or every batch up to it).
@@ -62,7 +62,8 @@ export default function PlayPage() {
     );
   }
 
-  const perfect = batchWords.length > 0 && batchWords.every((word) => word.levels[game.phase] >= MAX_LEVEL[game.phase]);
+  const required = requiredLevels(settings.learning)[game.phase];
+  const perfect = batchWords.length > 0 && batchWords.every((word) => word.levels[game.phase] >= required);
   const go = (value: number) => setBatch(Math.max(1, Math.min(totalBatches, value)));
 
   return (

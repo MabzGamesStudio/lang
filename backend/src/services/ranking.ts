@@ -1,12 +1,22 @@
 import type { DB } from '../db/connection.js';
 import { invalidateGlossIndex } from './glossIndex.js';
+import { fillChinesePinyin, isChinese } from './chinese.js';
 import type { LanguageConfig } from '../../../shared/types.js';
 
-// Frequency score = sum over sources of (occurrences per million tokens × source
-// weight). Every source therefore counts equally by default regardless of its
-// length, and a curated word list can be mixed with books.
-function recomputeTotals(db: DB): void {
+// Frequency score, in occurrences per million words:
+// - 'equal' (default): sum over sources of (per-million frequency × weight), so
+//   every source counts the same regardless of its length and a curated word
+//   list can be mixed with books;
+// - 'size': all sources are pooled, so longer texts count more (× weight).
+function recomputeTotals(db: DB, config: LanguageConfig): void {
   db.exec(`UPDATE words SET count = 0, mid_count = 0, cap_count = 0, score = 0`);
+  const pooled = config.sourceWeighting === 'size';
+  const totalTokens = pooled
+    ? (db.prepare(`SELECT MAX(COALESCE(SUM(token_count * weight), 0), 1) AS n FROM sources`).get() as { n: number }).n
+    : 1;
+  const score = pooled
+    ? `SUM(ws.count * s.weight) * 1000000.0 / ${Number(totalTokens)}`
+    : `SUM(ws.count * 1000000.0 / MAX(s.token_count, 1) * s.weight)`;
   db.exec(`
     UPDATE words SET count = t.count, mid_count = t.mid, cap_count = t.cap, score = t.score
     FROM (
@@ -14,7 +24,7 @@ function recomputeTotals(db: DB): void {
              SUM(ws.count) AS count,
              SUM(ws.mid_count) AS mid,
              SUM(ws.cap_count) AS cap,
-             SUM(ws.count * 1000000.0 / MAX(s.token_count, 1) * s.weight) AS score
+             ${score} AS score
       FROM word_sources ws JOIN sources s ON s.id = ws.source_id
       GROUP BY ws.word_id
     ) AS t
@@ -95,10 +105,11 @@ export function wordIdsOfSentences(db: DB, sentenceIds: number[]): number[] {
 
 export function recomputeAll(db: DB, config: LanguageConfig): void {
   db.transaction(() => {
-    recomputeTotals(db);
+    recomputeTotals(db, config);
     recomputeProperNouns(db, config);
     recomputeDisplay(db, config);
     recomputeRanks(db);
     refreshSentenceCounts(db);
+    if (isChinese(config)) fillChinesePinyin(db);
   })();
 }

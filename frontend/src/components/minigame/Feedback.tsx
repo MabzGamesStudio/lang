@@ -5,7 +5,7 @@ import { qualityLabel, type Outcome } from '../../lib/evaluate';
 import { useKey } from '../../lib/hooks';
 import { bestMatch } from '../../../../shared/text';
 import { voiceFor } from './PromptView';
-import ExtraCharacters, { typingCharacters, useInsertAtCursor } from '../ExtraCharacters';
+import ForeignInput from '../typing/ForeignInput';
 import type { AppSettings, LanguageSummary, Question, QuestionWord } from '../../../../shared/types';
 
 function SentenceDiff({ outcome }: { outcome: Outcome }) {
@@ -29,6 +29,37 @@ function SentenceDiff({ outcome }: { outcome: Outcome }) {
         );
       })}
     </div>
+  );
+}
+
+// The correct spelling with the letters that differ from what was typed highlighted.
+function CharDiff({ expected, typed }: { expected: string; typed: string }) {
+  const a = Array.from(expected);
+  const b = Array.from(typed.trim().toLowerCase());
+  const lower = a.map((char) => char.toLowerCase());
+  const table = Array.from({ length: a.length + 1 }, () => new Array<number>(b.length + 1).fill(0));
+  for (let i = a.length - 1; i >= 0; i--) {
+    for (let j = b.length - 1; j >= 0; j--) {
+      table[i][j] = lower[i] === b[j] ? table[i + 1][j + 1] + 1 : Math.max(table[i + 1][j], table[i][j + 1]);
+    }
+  }
+  const matched = new Array<boolean>(a.length).fill(false);
+  for (let i = 0, j = 0; i < a.length && j < b.length; ) {
+    if (lower[i] === b[j]) {
+      matched[i] = true;
+      i++;
+      j++;
+    } else if (table[i + 1][j] >= table[i][j + 1]) i++;
+    else j++;
+  }
+  return (
+    <span className="char-diff">
+      {a.map((char, index) => (
+        <span key={index} className={matched[index] ? '' : 'differs'}>
+          {char}
+        </span>
+      ))}
+    </span>
   );
 }
 
@@ -71,8 +102,6 @@ export default function Feedback({
   const [retyped, setRetyped] = useState('');
   const [retypeOk, setRetypeOk] = useState(!mustRetype);
   const retypeRef = useRef<HTMLInputElement>(null);
-  const insertRetype = useInsertAtCursor(retypeRef, setRetyped);
-  const retypeCharacters = question.response.side === 'foreign' ? typingCharacters(language) : [];
   const target = question.words[0];
   const chosen = question.options && !outcome.correct ? question.words.find((w) => question.options!.some((o) => o.wordId === w.id && o.text === outcome.response)) : undefined;
   const foreignVoice = voiceFor('foreign', language, settings);
@@ -83,10 +112,10 @@ export default function Feedback({
     if (mustRetype) requestAnimationFrame(() => retypeRef.current?.focus());
   }, [question.key, mustRetype]);
 
+  // Enter continues (an answer box that uses the key stops it first).
   useKey(
     'Enter',
     (event) => {
-      if (event.target === retypeRef.current) return;
       if (!retypeOk) return;
       event.preventDefault();
       onContinue();
@@ -95,6 +124,20 @@ export default function Feedback({
   );
 
   const playForeign = (text: string) => void playText(foreignVoice.target, text, foreignVoice.options);
+  const checkRetype = (text: string) => {
+    if (retypeOk) {
+      onContinue();
+      return;
+    }
+    const side = question.response.side;
+    const ok = bestMatch(text, accepted, {
+      locale: side === 'foreign' ? language.locale : 'en',
+      side,
+      accentLenient: false,
+      typoTolerance: false,
+    });
+    if (ok) setRetypeOk(true);
+  };
   const accepted = question.accepted?.map((a) => a.text) ?? [];
   const alternatives = question.sentence ? [] : accepted.filter((text) => text !== question.answer).slice(0, 6);
 
@@ -110,8 +153,12 @@ export default function Feedback({
         </div>
       )}
       {(outcome.quality === 'accent' || outcome.quality === 'typo') && outcome.matched && (
-        <div className="muted">
-          Exact spelling: <strong>{outcome.matched}</strong>
+        <div className="spelling">
+          <span className="muted">You typed:</span> <span>{outcome.response.trim()}</span>
+          <span className="muted"> · exact spelling:</span>{' '}
+          <strong {...(question.answerSide === 'foreign' ? { lang: language.code } : {})}>
+            <CharDiff expected={outcome.matched} typed={outcome.response} />
+          </strong>
         </div>
       )}
       {!outcome.correct && !question.sentence && (
@@ -143,34 +190,36 @@ export default function Feedback({
         )}
       </div>
       {mustRetype && (
-        <form
-          className="retype"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (retypeOk) {
-              onContinue();
-              return;
-            }
-            const side = question.response.side;
-            const ok = bestMatch(retyped, accepted, {
-              locale: side === 'foreign' ? language.locale : 'en',
-              side,
-              accentLenient: false,
-              typoTolerance: false,
-            });
-            if (ok) setRetypeOk(true);
-          }}
-        >
-          <input
-            ref={retypeRef}
-            value={retyped}
-            onChange={(event) => setRetyped(event.target.value)}
-            placeholder="Type the correct answer to continue"
-            className={retypeOk ? 'correct' : ''}
-            {...(question.response.side === 'foreign' ? { lang: language.code } : {})}
-          />
-          {!retypeOk && <ExtraCharacters characters={retypeCharacters} inputRef={retypeRef} onInsert={insertRetype} />}
-        </form>
+        <div className="retype">
+          {question.response.side === 'foreign' ? (
+            <ForeignInput
+              language={language}
+              value={retyped}
+              onChange={setRetyped}
+              onEnter={checkRetype}
+              inputRef={retypeRef}
+              className={retypeOk ? 'correct' : ''}
+              placeholder="Type the correct answer to continue"
+              readOnly={retypeOk}
+              showHelp={false}
+            />
+          ) : (
+            <input
+              ref={retypeRef}
+              value={retyped}
+              onChange={(event) => setRetyped(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter' || event.nativeEvent.isComposing) return;
+                event.preventDefault();
+                event.stopPropagation();
+                checkRetype(retyped);
+              }}
+              placeholder="Type the correct answer to continue"
+              className={retypeOk ? 'correct' : ''}
+              lang="en"
+            />
+          )}
+        </div>
       )}
       <button className="button primary continue" onClick={onContinue} disabled={!retypeOk}>
         Continue (Enter)

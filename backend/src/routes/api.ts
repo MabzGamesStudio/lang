@@ -56,6 +56,8 @@ import {
   type NextRequest,
 } from '../services/progress.js';
 import { exportEnglish, exportLanguage, importEnglish, importLanguage } from '../services/backup.js';
+import { inputIndex } from '../services/inputIndex.js';
+import { listHubBackups, restoreFromHub, uploadToHub } from '../services/huggingface.js';
 import { importLegacy, legacyAlreadyImported, legacyAvailable } from '../services/legacy.js';
 import { fetchDefinitions } from '../providers/definitions.js';
 import {
@@ -207,7 +209,9 @@ export function apiRouter(): Router {
     const id = lang(req);
     const before = getLanguageConfig(languageDb(id));
     const summary = updateLanguage(id, req.body ?? {});
-    if (before.detectProperNouns !== summary.detectProperNouns) rebuildStatistics(id);
+    if (before.detectProperNouns !== summary.detectProperNouns || before.sourceWeighting !== summary.sourceWeighting) {
+      rebuildStatistics(id);
+    }
     res.json(languageSummary(id));
   });
 
@@ -285,6 +289,10 @@ export function apiRouter(): Router {
   api.delete('/languages/:lang/sources/:source', (req, res) => {
     deleteSource(lang(req), intParam(req.params.source, 0));
     res.json(listSources(lang(req)));
+  });
+
+  api.get('/languages/:lang/input-index', (req, res) => {
+    res.json(inputIndex(lang(req)));
   });
 
   api.post('/languages/:lang/rebuild', (req, res) => {
@@ -456,10 +464,13 @@ export function apiRouter(): Router {
         db,
         body.items
           .filter((item: { id?: unknown }) => Number.isInteger(item.id))
-          .map((item: { id: number; english?: unknown; ipa?: unknown; pos?: unknown }) => ({
+          .map((item: { id: number; english?: unknown; pos?: unknown } & Record<string, unknown>) => ({
             id: item.id,
             english: Array.isArray(item.english) ? item.english.map(String) : typeof item.english === 'string' ? [item.english] : [],
-            pronunciation: typeof item.ipa === 'string' ? item.ipa : null,
+            pronunciation:
+              [item.pronunciation, item.pinyin, item.reading, item.romanization, item.ipa].find(
+                (value): value is string => typeof value === 'string' && value.trim() !== ''
+              ) ?? null,
             pos: typeof item.pos === 'string' ? item.pos : null,
             source,
           })),
@@ -494,7 +505,10 @@ export function apiRouter(): Router {
       // Words without translations block the batch: fetch them right away.
       const notice = next.notice;
       const lastFailure = definitionFailures.get(id) ?? 0;
+      // Words without translations are skipped; only when nothing else is left
+      // to practise, try to fetch their translations right away.
       if (
+        !next.question &&
         notice?.kind === 'missingDefinitions' &&
         notice.words?.length &&
         definitionsAvailable() &&
@@ -503,7 +517,7 @@ export function apiRouter(): Router {
         try {
           await fetchDefinitions(id, { wordIds: notice.words.map((w) => w.id) });
           next = sessionNext(id, request);
-          if (next.notice?.kind === 'missingDefinitions') definitionFailures.set(id, Date.now());
+          if (!next.question && next.notice?.kind === 'missingDefinitions') definitionFailures.set(id, Date.now());
         } catch (error) {
           definitionFailures.set(id, Date.now());
           next.notice = { ...notice, message: `${notice.message} Automatic lookup failed: ${(error as Error).message}` };
@@ -657,6 +671,27 @@ export function apiRouter(): Router {
     if (!Buffer.isBuffer(req.body)) throw new HttpError(400, 'No file received');
     await importEnglish(req.body);
     res.json({ ok: true });
+  });
+
+  // Hugging Face Hub backups
+  api.post('/huggingface/upload', (req, res) => {
+    const kind = req.body?.kind === 'english' ? 'english' : 'language';
+    if (kind === 'english') {
+      res.json(startJob(null, 'hf-upload:english', 'Uploading English & images to Hugging Face', (ctx) => uploadToHub({ kind: 'english' }, ctx)));
+      return;
+    }
+    const id = String(req.body?.lang ?? '');
+    const { name } = getLanguageConfig(languageDb(id));
+    res.json(startJob(id, `hf-upload:${id}`, `Uploading ${name} to Hugging Face`, (ctx) => uploadToHub({ kind: 'language', langId: id }, ctx)));
+  });
+
+  api.get('/huggingface/backups', async (_req, res) => {
+    res.json(await listHubBackups());
+  });
+
+  api.post('/huggingface/restore', (req, res) => {
+    const path = str(req.body?.path);
+    res.json(startJob(null, `hf-restore:${path}`, `Restoring ${path} from Hugging Face`, (ctx) => restoreFromHub(path, ctx)));
   });
 
   api.get('/legacy', (_req, res) => {

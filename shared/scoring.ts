@@ -7,13 +7,26 @@ export const BATCH_SIZE = 7;
 export const BLOCK_BATCHES = 14;
 export const BLOCK_SIZE = BATCH_SIZE * BLOCK_BATCHES;
 
-// Mastery levels per category. 0 = not encountered yet.
+// Mastery levels per category. 0 = not encountered yet. These are the
+// defaults; the number of correct answers needed is adjustable in settings.
 export const MAX_LEVEL: Record<Phase, number> = {
   recognition: 2,
   recall: 3,
   recite: 2,
   translate: 3,
 };
+
+export const MAX_REQUIRED_CORRECT = 10;
+
+// Correct answers needed per phase, from the learning settings.
+export function requiredLevels(learning?: { requiredCorrect?: Partial<Record<Phase, number>> }): Record<Phase, number> {
+  const result = { ...MAX_LEVEL };
+  for (const phase of Object.keys(result) as Phase[]) {
+    const value = Math.round(Number(learning?.requiredCorrect?.[phase]));
+    if (Number.isFinite(value)) result[phase] = Math.max(1, Math.min(MAX_REQUIRED_CORRECT, value));
+  }
+  return result;
+}
 
 export const LEVEL_DELTA: Record<Phase, { correct: number; wrong: number }> = {
   recognition: { correct: 1, wrong: -1 },
@@ -29,9 +42,21 @@ export const LEVEL_NAMES: Record<Phase, string[]> = {
   translate: ['Not encountered', 'Bad translation', 'Okay translation', 'Good translation'],
 };
 
-export function nextLevel(phase: Phase, level: number, correct: boolean): number {
+export function nextLevel(phase: Phase, level: number, correct: boolean, max = MAX_LEVEL[phase]): number {
   const delta = correct ? LEVEL_DELTA[phase].correct : LEVEL_DELTA[phase].wrong;
-  return Math.max(1, Math.min(MAX_LEVEL[phase], level + delta));
+  // Once encountered a word stays at level 1 or more, unless one correct
+  // answer is enough to master it: then a mistake must undo the mastery.
+  const floor = max >= 2 ? 1 : 0;
+  return Math.max(floor, Math.min(max, level + delta));
+}
+
+// Names for each level of a phase. The TODO.txt names are kept for the
+// default number of levels; custom numbers get generic names.
+export function levelNames(phase: Phase, max: number): string[] {
+  if (max === MAX_LEVEL[phase]) return LEVEL_NAMES[phase];
+  return Array.from({ length: max + 1 }, (_, level) =>
+    level === 0 ? 'Not encountered' : level === max ? 'Mastered' : `Level ${level}`
+  );
 }
 
 // Long term repetition milestones (exponentially growing delays).
