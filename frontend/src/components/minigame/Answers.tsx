@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Mic, MicOff, SkipForward } from 'lucide-react';
-import ExtraCharacters from '../ExtraCharacters';
+import ExtraCharacters, { typingCharacters, useInsertAtCursor } from '../ExtraCharacters';
 import { useKey } from '../../lib/hooks';
 import { evaluateChoice, evaluateSpoken, evaluateTyped, type Outcome } from '../../lib/evaluate';
 import { browserRecognitionAvailable, startListening, type Listening } from '../../lib/speech';
@@ -66,7 +66,7 @@ export function TypedAnswer({ question, language, settings, disabled, outcome, o
   const [value, setValue] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const foreign = question.response.side === 'foreign';
-  const characters = foreign ? (language.extraCharacters.length ? language.extraCharacters : language.autoCharacters) : [];
+  const characters = foreign ? typingCharacters(language) : [];
 
   useEffect(() => {
     setValue('');
@@ -75,17 +75,7 @@ export function TypedAnswer({ question, language, settings, disabled, outcome, o
     if (!disabled && !outcome) inputRef.current?.focus();
   }, [disabled, outcome, question.key]);
 
-  const insert = useCallback((char: string) => {
-    const input = inputRef.current;
-    if (!input) return;
-    const start = input.selectionStart ?? input.value.length;
-    const end = input.selectionEnd ?? start;
-    setValue((current) => current.slice(0, start) + char + current.slice(end));
-    requestAnimationFrame(() => {
-      input.focus();
-      input.setSelectionRange(start + char.length, start + char.length);
-    });
-  }, []);
+  const insert = useInsertAtCursor(inputRef, setValue);
 
   return (
     <form

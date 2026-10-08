@@ -5,6 +5,7 @@ import { qualityLabel, type Outcome } from '../../lib/evaluate';
 import { useKey } from '../../lib/hooks';
 import { bestMatch } from '../../../../shared/text';
 import { voiceFor } from './PromptView';
+import ExtraCharacters, { typingCharacters, useInsertAtCursor } from '../ExtraCharacters';
 import type { AppSettings, LanguageSummary, Question, QuestionWord } from '../../../../shared/types';
 
 function SentenceDiff({ outcome }: { outcome: Outcome }) {
@@ -70,6 +71,8 @@ export default function Feedback({
   const [retyped, setRetyped] = useState('');
   const [retypeOk, setRetypeOk] = useState(!mustRetype);
   const retypeRef = useRef<HTMLInputElement>(null);
+  const insertRetype = useInsertAtCursor(retypeRef, setRetyped);
+  const retypeCharacters = question.response.side === 'foreign' ? typingCharacters(language) : [];
   const target = question.words[0];
   const chosen = question.options && !outcome.correct ? question.words.find((w) => question.options!.some((o) => o.wordId === w.id && o.text === outcome.response)) : undefined;
   const foreignVoice = voiceFor('foreign', language, settings);
@@ -166,6 +169,7 @@ export default function Feedback({
             className={retypeOk ? 'correct' : ''}
             {...(question.response.side === 'foreign' ? { lang: language.code } : {})}
           />
+          {!retypeOk && <ExtraCharacters characters={retypeCharacters} inputRef={retypeRef} onInsert={insertRetype} />}
         </form>
       )}
       <button className="button primary continue" onClick={onContinue} disabled={!retypeOk}>

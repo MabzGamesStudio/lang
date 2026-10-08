@@ -1,6 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { alignTokens, bestMatch, glossKey, glossVariants, normalizedTokens, splitGlossList, spokenWordSimilarity } from '../shared/text.js';
+import {
+  alignTokens,
+  bestMatch,
+  glossKey,
+  glossVariants,
+  normalizedTokens,
+  splitGlossList,
+  spokenWordSimilarity,
+  stripParentheticals,
+} from '../shared/text.js';
 import { nextLevel, reviewIntervalMs, DAY_MS } from '../shared/scoring.js';
 import { cleanBookText, parseCsv, processText, tidySentence } from '../backend/src/services/textProcessing.js';
 import { labelsFromFilename } from '../backend/src/services/english.js';
@@ -30,6 +39,20 @@ test('typed answers are forgiving: accents, typos, variants, synonyms', () => {
   assert.equal(bestMatch('said', ['(he/she) said'], english)?.quality, 'exact');
   // Second accepted answer (a synonym) is found.
   assert.equal(bestMatch('eso', ['que', 'eso'], foreign)?.index, 1);
+});
+
+test('notes in parentheses are never required or spoken', () => {
+  assert.equal(stripParentheticals('(he/she) said'), 'said');
+  assert.equal(stripParentheticals('el (m.) perro'), 'el perro');
+  assert.equal(stripParentheticals('个（量词）'), '个');
+  assert.equal(stripParentheticals('dijo (él).'), 'dijo.');
+  assert.equal(stripParentheticals('(only a note)'), '(only a note)');
+  // Typing without the note is exact; typing it is fine too.
+  assert.equal(bestMatch('perro', ['perro (m)'], foreign)?.quality, 'exact');
+  assert.equal(bestMatch('perro (m)', ['perro (m)'], foreign)?.quality, 'exact');
+  assert.equal(bestMatch('个', ['个（量词）'], { ...foreign, locale: 'zh' })?.quality, 'exact');
+  assert.equal(bestMatch('to go', ['to go (somewhere)'], english)?.quality, 'exact');
+  assert.equal(spokenWordSimilarity(['perro'], ['perro (m)'], 'es'), 1);
 });
 
 test('sentence closeness metric aligns words', () => {

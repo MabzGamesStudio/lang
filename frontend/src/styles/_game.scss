@@ -500,6 +500,12 @@
     align-self: flex-end;
   }
 
+  .retype {
+    display: flex;
+    flex-direction: column;
+    gap: $space-sm;
+  }
+
   .retype input {
     width: 100%;
     font-size: 1.2rem;

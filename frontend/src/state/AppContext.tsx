@@ -47,6 +47,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const toastId = useRef(0);
   const knownJobs = useRef(new Map<string, JobInfo['status']>());
+  const lastStatsRefresh = useRef(0);
 
   const notify = useCallback((message: string, kind: Toast['kind'] = 'info') => {
     const id = ++toastId.current;
@@ -126,7 +127,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         knownJobs.current.set(job.id, job.status);
       }
       setJobs(list);
-      if (finished) await refreshLanguages();
+      // Word and sentence counts change while jobs run: refresh them every few seconds.
+      const stillRunning = list.some((job) => job.status === 'running');
+      if (finished || (stillRunning && Date.now() - lastStatsRefresh.current > 5000)) {
+        lastStatsRefresh.current = Date.now();
+        await refreshLanguages();
+      }
     } catch {
       // backend temporarily unavailable
     }

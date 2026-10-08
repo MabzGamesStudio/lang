@@ -24,6 +24,8 @@ import { searchGutenberg } from '../services/gutenberg.js';
 import {
   deleteSentence,
   getWord,
+  nextWordsToPrepare,
+  undefinedWordCount,
   listSentences,
   listWords,
   resetWordProgress,
@@ -396,22 +398,26 @@ export function apiRouter(): Router {
   });
 
   // One click: definitions + translations + example sentences + audio for the
-  // N most frequent words.
+  // next N most frequent words that have no definition yet.
   api.post('/languages/:lang/autopilot', (req, res) => {
     const id = lang(req);
     const words = intParam(req.body?.words, 500, 7, 50_000);
     res.json(
-      startJob(id, 'autopilot', `Preparing the ${words} most frequent words`, async (ctx) => {
+      startJob(id, 'autopilot', `Preparing the next ${words} words without a definition`, async (ctx) => {
         const db = languageDb(id);
-        const wordIds = (db.prepare(`SELECT id FROM words WHERE active = 1 AND rank <= ? ORDER BY rank`).all(words) as { id: number }[]).map(
-          (row) => row.id
-        );
+        const { wordIds, needDefinitions } = nextWordsToPrepare(db, words);
+        if (wordIds.length === 0) return 'Every word already has a definition and translated sentences';
         const summary: string[] = [];
-        if (definitionsAvailable()) summary.push(await fetchDefinitions(id, { wordIds }, ctx));
+        if (!needDefinitions) summary.push('Every word already has a definition; preparing sentences for the next words instead');
+        if (needDefinitions && definitionsAvailable()) summary.push(await fetchDefinitions(id, { wordIds }, ctx));
         if (translationAvailable()) summary.push(await translateSentences(id, { wordIds, perWord: 4 }, ctx));
         if (llmAvailable()) summary.push(await generateSentences(id, { wordIds, minSentences: 2 }, ctx));
-        if (ttsGenerates()) summary.push(await pregenerateAudio(id, { words, sentences: Math.min(words, 1000) }, ctx));
-        return summary.join('\n') || 'No services are configured yet (Configuration → Services)';
+        if (ttsGenerates()) {
+          summary.push(await pregenerateAudio(id, { words, sentences: Math.min(words * 2, 1000), wordIds }, ctx));
+        }
+        if (summary.length === 0) return 'No services are configured yet (Configuration → Services)';
+        summary.push(`${undefinedWordCount(db).toLocaleString()} words still have no definition`);
+        return summary.join('\n');
       })
     );
   });

@@ -12,7 +12,9 @@ process.env.LANG_DATA_DIR = dataDir;
 
 const { createLanguage, languageSummary } = await import('../backend/src/services/languages.js');
 const { importText, importWordList, listSources } = await import('../backend/src/services/corpus.js');
-const { listWords, saveDefinitions, saveSentenceTranslations } = await import('../backend/src/services/words.js');
+const { listWords, nextWordsToPrepare, saveDefinitions, saveSentenceTranslations, undefinedWordCount } = await import(
+  '../backend/src/services/words.js'
+);
 const { sessionNext, freePlayNext, applyResults, progressSummary } = await import('../backend/src/services/progress.js');
 const { addImage } = await import('../backend/src/services/english.js');
 const { exportLanguage, importLanguage, exportEnglish, importEnglish } = await import('../backend/src/services/backup.js');
@@ -71,6 +73,21 @@ test('language lifecycle', async (t) => {
     assert.ok(words[0].english.length > 0);
   });
 
+  await t.test('autopilot takes the next words without a definition', () => {
+    const db = languageDb('spanish');
+    const missing = undefinedWordCount(db);
+    assert.ok(missing > 0);
+    const next = nextWordsToPrepare(db, 5);
+    assert.equal(next.needDefinitions, true);
+    assert.equal(next.wordIds.length, 5);
+    const rows = db
+      .prepare(`SELECT english, rank FROM words WHERE id IN (SELECT value FROM json_each(?)) ORDER BY rank`)
+      .all(JSON.stringify(next.wordIds)) as { english: string | null; rank: number }[];
+    assert.ok(rows.every((row) => row.english === null), 'only undefined words');
+    const firstUndefined = (db.prepare(`SELECT MIN(rank) AS r FROM words WHERE active = 1 AND english IS NULL`).get() as { r: number }).r;
+    assert.equal(rows[0].rank, firstUndefined, 'most frequent first');
+  });
+
   await t.test('give every remaining word a definition and translate sentences', () => {
     const db = languageDb('spanish');
     const missing = db.prepare(`SELECT id, word FROM words WHERE english IS NULL`).all() as { id: number; word: string }[];
@@ -79,6 +96,8 @@ test('language lifecycle', async (t) => {
     saveSentenceTranslations(db, sentences.map((s) => ({ id: s.id, english: `EN ${s.text}` })), 'test');
     const summary = languageSummary('spanish');
     assert.equal(summary.definedWordCount, summary.wordCount);
+    assert.equal(undefinedWordCount(db), 0);
+    assert.equal(nextWordsToPrepare(db, 5).needDefinitions, false, 'then it moves on to sentences');
     assert.equal(summary.translatedSentenceCount, summary.sentenceCount);
   });
 

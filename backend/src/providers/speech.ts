@@ -6,6 +6,7 @@ import { httpFetch, postForBytes, postJson } from '../services/http.js';
 import { parseEnglish } from '../services/words.js';
 import type { JobContext } from '../services/jobs.js';
 import { colabBaseUrl } from './llm.js';
+import { stripParentheticals } from '../../../shared/text.js';
 import type { AppSettings } from '../../../shared/types.js';
 
 // ---------------------------------------------------------------------------
@@ -91,7 +92,8 @@ export async function getAudio(target: string, text: string, generate: boolean):
   const settings = getSettings();
   const voice = voiceTarget(target, settings);
   const key = voiceKey(settings, voice);
-  const clean = text.trim().slice(0, 500);
+  // Notes in parentheses are never spoken.
+  const clean = stripParentheticals(text).slice(0, 500);
   if (!clean) return null;
   const cached = voice.db
     .prepare(`SELECT mime, data FROM audio WHERE text = ? ORDER BY voice = ? DESC, RANDOM() LIMIT 1`)
@@ -106,14 +108,14 @@ export async function getAudio(target: string, text: string, generate: boolean):
 }
 
 function hasAudio(db: DB, text: string): boolean {
-  return Boolean(db.prepare(`SELECT 1 FROM audio WHERE text = ? LIMIT 1`).get(text.trim()));
+  return Boolean(db.prepare(`SELECT 1 FROM audio WHERE text = ? LIMIT 1`).get(stripParentheticals(text).slice(0, 500)));
 }
 
 // Pre-generates audio for the most frequent words (foreign + English) and the
 // easiest sentences so practice works offline and without delays.
 export async function pregenerateAudio(
   langId: string,
-  options: { words: number; sentences: number },
+  options: { words: number; sentences: number; wordIds?: number[] },
   ctx: JobContext
 ): Promise<string> {
   const settings = getSettings();
@@ -122,12 +124,25 @@ export async function pregenerateAudio(
   }
   const db = languageDb(langId);
   const english = englishDatabase();
-  const words = db
-    .prepare(`SELECT display, english FROM words WHERE active = 1 AND rank IS NOT NULL ORDER BY rank LIMIT ?`)
-    .all(options.words) as { display: string; english: string | null }[];
-  const sentences = db
-    .prepare(`SELECT text, english FROM sentences WHERE max_rank IS NOT NULL ORDER BY max_rank, word_count LIMIT ?`)
-    .all(options.sentences) as { text: string; english: string | null }[];
+  const ids = options.wordIds ? JSON.stringify(options.wordIds) : null;
+  const words = (
+    ids
+      ? db.prepare(`SELECT display, english FROM words WHERE id IN (SELECT value FROM json_each(?)) ORDER BY rank`).all(ids)
+      : db.prepare(`SELECT display, english FROM words WHERE active = 1 AND rank IS NOT NULL ORDER BY rank LIMIT ?`).all(options.words)
+  ) as { display: string; english: string | null }[];
+  const sentences = (
+    ids
+      ? db
+          .prepare(
+            `SELECT text, english FROM sentences
+             WHERE english IS NOT NULL AND id IN (SELECT sentence_id FROM sentence_words WHERE word_id IN (SELECT value FROM json_each(?)))
+             ORDER BY max_rank, word_count LIMIT ?`
+          )
+          .all(ids, options.sentences)
+      : db
+          .prepare(`SELECT text, english FROM sentences WHERE max_rank IS NOT NULL ORDER BY max_rank, word_count LIMIT ?`)
+          .all(options.sentences)
+  ) as { text: string; english: string | null }[];
   const tasks: { target: string; text: string }[] = [];
   for (const word of words) {
     if (!hasAudio(db, word.display)) tasks.push({ target: langId, text: word.display });
