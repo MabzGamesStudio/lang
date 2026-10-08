@@ -24,7 +24,8 @@ export interface RunnerProps {
   showPreview?: boolean;
   onUpdate?: (response: NextResponse) => void;
   onResults?: (results: ResultsResponse) => void;
-  renderNotice?: (notice: Notice, retry: () => void) => ReactNode;
+  // inline: shown above a question (e.g. words of the batch that are skipped).
+  renderNotice?: (notice: Notice, retry: () => void, inline: boolean) => ReactNode;
   paused?: boolean;
 }
 
@@ -79,9 +80,16 @@ export default function MinigameRunner({
         return;
       }
       prefetchQuestionAudio(next.question, language);
+      // Before quizzing a batch, show its words once (per batch and phase,
+      // or per batch in batch-by-batch order).
       const state = next.state;
-      const key = `${state.mode}:${state.block}:${state.batch}`;
-      if (showPreview && state.newBatch && settings.learning.batchPreview && !previewed.current.has(key)) {
+      const previewMode = settings.learning.batchPreview;
+      const key =
+        settings.learning.progressionOrder === 'batch'
+          ? `${state.mode}:${state.block}:${state.batch}`
+          : `${state.mode}:${state.block}:${state.phase}:${state.batch}`;
+      const wanted = previewMode === 'every' || (previewMode === 'new' && state.newBatch);
+      if (showPreview && wanted && state.batchWords.length > 0 && !previewed.current.has(key)) {
         previewed.current.add(key);
         setStage('preview');
       } else {
@@ -91,7 +99,7 @@ export default function MinigameRunner({
       setError(errorMessage(err));
       setStage('error');
     }
-  }, [language, showPreview, settings.learning.batchPreview]);
+  }, [language, showPreview, settings.learning.batchPreview, settings.learning.progressionOrder]);
 
   useEffect(() => {
     recent.current = [];
@@ -143,7 +151,9 @@ export default function MinigameRunner({
         void playText(voice.target, question.sentence ? question.sentence.text : question.words[0].display, voice.options);
       }
       const delay = settings.learning.autoAdvanceMs;
-      if (final.correct && delay > 0 && !paused) {
+      // Accepted but not spelled exactly: stay so the correct spelling can be seen.
+      const hold = settings.learning.pauseOnInexact && question.response.mode === 'type' && final.quality !== 'exact';
+      if (final.correct && delay > 0 && !paused && !hold) {
         advanceTimer.current = window.setTimeout(() => void load(), question.sentence ? delay + 1500 : delay);
       }
     },
@@ -188,7 +198,7 @@ export default function MinigameRunner({
     return (
       <div className="runner">
         {renderNotice ? (
-          renderNotice(response.notice, () => void load())
+          renderNotice(response.notice, () => void load(), false)
         ) : (
           <div className="notice">
             <p>{response.notice.message}</p>
@@ -205,6 +215,7 @@ export default function MinigameRunner({
       <BatchPreview
         words={response.state.batchWords}
         batch={response.state.batch}
+        phase={response.state.phase}
         language={language}
         settings={settings}
         onStart={() => setStage('answering')}
@@ -228,7 +239,7 @@ export default function MinigameRunner({
   return (
     <div className={`runner stage-${stage}`}>
       {response.notice && response.notice.kind === 'missingDefinitions' && renderNotice && (
-        <div className="inline-notice">{renderNotice(response.notice, () => void load())}</div>
+        <div className="inline-notice">{renderNotice(response.notice, () => void load(), true)}</div>
       )}
       <div className="game-label">
         <span className={`phase-tag phase-${question.phase}`}>{PHASE_LABELS[question.phase]}</span>

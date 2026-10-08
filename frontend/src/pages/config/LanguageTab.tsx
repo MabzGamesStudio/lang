@@ -6,7 +6,8 @@ import { useAction, useApp } from '../../state/AppContext';
 import { browserVoices } from '../../lib/audio';
 import { Field, NumberInput, Section, TextInput, Toggle } from './fields';
 import { LANGUAGE_CATALOG, findCatalogLanguage } from '../../../../shared/languages';
-import type { LanguageConfig, LanguageSummary } from '../../../../shared/types';
+import { INPUT_METHOD_LABELS, resolveInputMethod } from '../../../../shared/ime/index';
+import type { InputMethod, LanguageConfig, LanguageSummary } from '../../../../shared/types';
 
 function AddLanguage() {
   const { languages, refreshLanguages, selectLanguage } = useApp();
@@ -121,7 +122,23 @@ function EditLanguage({ language }: { language: LanguageSummary }) {
         <Field label="Longest sentence (words)" hint="Applies to books added from now on">
           <NumberInput value={draft.maxSentenceWords} min={2} max={80} onChange={(value) => set('maxSentenceWords', value)} />
         </Field>
-        <Field label="Special letters for typing" hint={`Automatic: ${language.autoCharacters.join(' ') || 'none'}`}>
+        <Field
+          label="Typing answers"
+          hint={
+            draft.inputMethod === 'auto'
+              ? `Automatic: ${INPUT_METHOD_LABELS[resolveInputMethod('auto', draft.code)]}`
+              : 'Click the button next to the answer box to switch between this and direct typing'
+          }
+        >
+          <select value={draft.inputMethod} onChange={(event) => set('inputMethod', event.target.value as InputMethod)}>
+            {(Object.keys(INPUT_METHOD_LABELS) as InputMethod[]).map((method) => (
+              <option key={method} value={method}>
+                {INPUT_METHOD_LABELS[method]}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Letter buttons" hint={`Automatic: ${language.autoCharacters.slice(0, 30).join(' ') || 'none'}`}>
           <TextInput
             value={draft.extraCharacters.join(' ')}
             onChange={(value) => set('extraCharacters', value.split(/\s+/).filter(Boolean))}

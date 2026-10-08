@@ -1,8 +1,118 @@
 import { useEffect, useState } from 'react';
-import { Download, History, Upload } from 'lucide-react';
+import { CloudDownload, CloudUpload, Download, History, RefreshCw, Upload } from 'lucide-react';
 import { api } from '../../api';
 import { useAction, useApp } from '../../state/AppContext';
-import { Section } from './fields';
+import JobsPanel from '../../components/JobsPanel';
+import { formatDate } from '../../lib/hooks';
+import { Field, Section, TextInput, Toggle, useSettingsDraft } from './fields';
+import type { HubBackup } from '../../../../shared/types';
+
+function HuggingFace() {
+  const { languages, trackJob } = useApp();
+  const run = useAction();
+  const [draft, update, flush] = useSettingsDraft();
+  const [listing, setListing] = useState<{ repo: string; url: string; backups: HubBackup[] } | null>(null);
+  const [loading, setLoading] = useState(false);
+  if (!draft) return null;
+  const configured = Boolean(draft.huggingface.token);
+
+  async function refresh() {
+    setLoading(true);
+    await flush();
+    const result = await run(() => api.hubBackups());
+    setLoading(false);
+    if (result) setListing(result);
+  }
+
+  return (
+    <Section
+      title="Hugging Face"
+      description={
+        <>
+          Keep the same zips in a dataset repository on the Hugging Face Hub, to sync computers or share data. Create an access token
+          with <em>write</em> permission at huggingface.co → Settings → Access Tokens.
+        </>
+      }
+    >
+      <div className="form-grid">
+        <Field label="Access token">
+          <TextInput type="password" value={draft.huggingface.token} onChange={(value) => update((s) => void (s.huggingface.token = value.trim()))} placeholder="hf_…" />
+        </Field>
+        <Field label="Dataset repository" hint="“lang-data” is created under your account; or “user/name”">
+          <TextInput value={draft.huggingface.repo} onChange={(value) => update((s) => void (s.huggingface.repo = value))} placeholder="lang-data" />
+        </Field>
+      </div>
+      <Toggle checked={draft.huggingface.private} onChange={(value) => update((s) => void (s.huggingface.private = value))}>
+        Create the repository as private
+      </Toggle>
+      <div className="row">
+        {languages.map((entry) => (
+          <button
+            key={entry.id}
+            className="button"
+            disabled={!configured}
+            onClick={async () => {
+              await flush();
+              trackJob(await run(() => api.hubUpload({ kind: 'language', lang: entry.id })));
+            }}
+          >
+            <CloudUpload size={16} /> Upload {entry.name}
+          </button>
+        ))}
+        <button
+          className="button"
+          disabled={!configured}
+          onClick={async () => {
+            await flush();
+            trackJob(await run(() => api.hubUpload({ kind: 'english' })));
+          }}
+        >
+          <CloudUpload size={16} /> Upload English & images
+        </button>
+        <button className="button" disabled={!configured || loading} onClick={() => void refresh()}>
+          <RefreshCw size={16} /> Show backups on Hugging Face
+        </button>
+      </div>
+      <JobsPanel types={['hf-']} />
+      {listing && (
+        <>
+          <p>
+            <a href={listing.url} target="_blank" rel="noreferrer">
+              {listing.repo}
+            </a>
+          </p>
+          {listing.backups.length === 0 ? (
+            <p className="muted">No backups in this repository yet.</p>
+          ) : (
+            <table className="table">
+              <tbody>
+                {listing.backups.map((backup) => (
+                  <tr key={backup.path}>
+                    <td>{backup.path}</td>
+                    <td>{(backup.size / 1_000_000).toFixed(1)} MB</td>
+                    <td className="muted">{backup.updatedAt ? formatDate(Date.parse(backup.updatedAt)) : ''}</td>
+                    <td className="right">
+                      <button
+                        className="button small"
+                        onClick={async () => {
+                          const what = backup.path.startsWith('languages/') ? 'this language' : 'all images and English words';
+                          if (!window.confirm(`Replace ${what} on this computer with ${backup.path} from Hugging Face?`)) return;
+                          trackJob(await run(() => api.hubRestore(backup.path)));
+                        }}
+                      >
+                        <CloudDownload size={14} /> Restore
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </>
+      )}
+    </Section>
+  );
+}
 
 function UploadButton({ label, onFile }: { label: string; onFile: (file: File) => Promise<void> }) {
   const [busy, setBusy] = useState(false);
@@ -83,6 +193,8 @@ export default function DataTab() {
           />
         </div>
       </Section>
+
+      <HuggingFace />
 
       {legacy?.available && (
         <Section title="Previous version" description="Data from the old app (langData/app.db) was found.">

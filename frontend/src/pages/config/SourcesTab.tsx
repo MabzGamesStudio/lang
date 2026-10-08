@@ -4,7 +4,7 @@ import { api } from '../../api';
 import { useAction, useApp } from '../../state/AppContext';
 import JobsPanel from '../../components/JobsPanel';
 import { Field, NumberInput, Section, TextInput } from './fields';
-import type { GutenbergBook, LanguageSummary, SourceRow } from '../../../../shared/types';
+import type { GutenbergBook, LanguageSummary, SourceRow, SourceWeighting } from '../../../../shared/types';
 
 function GutenbergSearch({ language, onImport }: { language: LanguageSummary; onImport: (url: string, title: string) => void }) {
   const run = useAction();
@@ -202,8 +202,29 @@ export default function SourcesTab({ language }: { language: LanguageSummary }) 
 
       <Section
         title="Sources"
-        description="Each source counts equally towards word frequencies (per million words). Raise or lower its weight to change its influence."
+        description={
+          language.sourceWeighting === 'size'
+            ? 'Longer texts count more: word counts of all sources are added together. Weights multiply a source’s counts.'
+            : 'Each source counts equally towards word frequencies (per million words), whatever its length. Raise or lower its weight to change its influence.'
+        }
       >
+        <div className="form-grid">
+          <Field label="Combine sources">
+            <select
+              value={language.sourceWeighting}
+              onChange={async (event) => {
+                const updated = await run(
+                  () => api.updateLanguage(language.id, { sourceWeighting: event.target.value as SourceWeighting }),
+                  'Word frequencies recalculated'
+                );
+                if (updated) await refreshLanguages();
+              }}
+            >
+              <option value="equal">Every source counts the same</option>
+              <option value="size">By number of words (longer texts count more)</option>
+            </select>
+          </Field>
+        </div>
         {sources.length === 0 ? (
           <p className="muted">No sources yet.</p>
         ) : (

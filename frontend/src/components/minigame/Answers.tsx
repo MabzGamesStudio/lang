@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Mic, MicOff, SkipForward } from 'lucide-react';
-import ExtraCharacters, { typingCharacters, useInsertAtCursor } from '../ExtraCharacters';
+import ForeignInput from '../typing/ForeignInput';
 import { useKey } from '../../lib/hooks';
 import { evaluateChoice, evaluateSpoken, evaluateTyped, type Outcome } from '../../lib/evaluate';
 import { browserRecognitionAvailable, startListening, type Listening } from '../../lib/speech';
@@ -66,7 +66,6 @@ export function TypedAnswer({ question, language, settings, disabled, outcome, o
   const [value, setValue] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const foreign = question.response.side === 'foreign';
-  const characters = foreign ? typingCharacters(language) : [];
 
   useEffect(() => {
     setValue('');
@@ -75,38 +74,51 @@ export function TypedAnswer({ question, language, settings, disabled, outcome, o
     if (!disabled && !outcome) inputRef.current?.focus();
   }, [disabled, outcome, question.key]);
 
-  const insert = useInsertAtCursor(inputRef, setValue);
+  const submit = (text: string) => {
+    if (disabled || outcome || !text.trim()) return;
+    onAnswer(evaluateTyped(question, text, language.locale || language.code, settings.learning));
+  };
+  const className = `answer-input ${outcome ? (outcome.correct ? 'correct' : 'wrong') : ''} ${question.sentence ? 'sentence' : ''}`;
 
   return (
-    <form
-      className="typed-answer"
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (disabled || outcome || !value.trim()) return;
-        onAnswer(evaluateTyped(question, value, language.locale || language.code, settings.learning));
-      }}
-    >
-      <input
-        ref={inputRef}
-        className={`answer-input ${outcome ? (outcome.correct ? 'correct' : 'wrong') : ''} ${question.sentence ? 'sentence' : ''}`}
-        value={value}
-        onChange={(event) => setValue(event.target.value)}
-        readOnly={Boolean(outcome)}
-        disabled={disabled}
-        placeholder={foreign ? `Type in ${language.name}…` : 'Type in English…'}
-        autoComplete="off"
-        autoCorrect="off"
-        autoCapitalize="off"
-        spellCheck={false}
-        {...sideProps(question, language)}
-      />
-      {!outcome && <ExtraCharacters characters={characters} inputRef={inputRef} onInsert={insert} />}
-      {!outcome && (
-        <div className="hint muted">
-          Press Enter to check{characters.length ? ' · digits insert special letters' : ''}
-        </div>
+    <div className="typed-answer">
+      {foreign ? (
+        <ForeignInput
+          language={language}
+          value={value}
+          onChange={setValue}
+          onEnter={submit}
+          inputRef={inputRef}
+          className={className}
+          readOnly={Boolean(outcome)}
+          disabled={disabled}
+          placeholder={`Type in ${language.name}…`}
+        />
+      ) : (
+        <input
+          ref={inputRef}
+          className={className}
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key !== 'Enter' || event.nativeEvent.isComposing || disabled || outcome) return;
+            // Submitting must not also trigger the page's Enter shortcut (continue).
+            event.preventDefault();
+            event.stopPropagation();
+            submit(value);
+          }}
+          readOnly={Boolean(outcome)}
+          disabled={disabled}
+          placeholder="Type in English…"
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="off"
+          spellCheck={false}
+          lang="en"
+        />
       )}
-    </form>
+      {!outcome && <div className="hint muted">Press Enter to check</div>}
+    </div>
   );
 }
 

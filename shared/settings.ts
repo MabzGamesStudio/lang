@@ -27,7 +27,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
     provider: 'browser',
     openai: { baseUrl: 'https://api.openai.com/v1', apiKey: '', model: 'whisper-1' },
   },
+  huggingface: { token: '', repo: '', private: true, hubUrl: 'https://huggingface.co' },
   learning: {
+    requiredCorrect: { recognition: 2, recall: 3, recite: 2, translate: 3 },
+    progressionOrder: 'phase',
     disableSpeaking: false,
     disableListening: false,
     disabledGames: [],
@@ -38,7 +41,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
     speechThreshold: 0.7,
     autoAdvanceMs: 900,
     retypeOnMistake: true,
-    batchPreview: true,
+    pauseOnInexact: true,
+    batchPreview: 'every',
     memorizeHide: true,
     playAudioOnFeedback: true,
     pomodoro: true,
@@ -60,6 +64,7 @@ export const SECRET_PATHS: string[][] = [
   ['tts', 'openai', 'apiKey'],
   ['tts', 'google', 'apiKey'],
   ['stt', 'openai', 'apiKey'],
+  ['huggingface', 'token'],
 ];
 
 export const MASK_PREFIX = '••••';

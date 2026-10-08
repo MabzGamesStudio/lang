@@ -66,6 +66,11 @@ function ColabFiles({ language }: { language: LanguageSummary }) {
   return (
     <details>
       <summary>Offline batches (no tunnel): download a job file, run it in the notebook, upload the results</summary>
+      <p className="muted">
+        The notebook saves results to Google Drive after every batch and downloads a part file every 1,000 results, so a
+        disconnect loses at most the batch in progress: <em>Runtime → Run all</em> again continues where it stopped. Upload all
+        the part files at once here.
+      </p>
       <div className="row">
         <Field label="Items per file">
           <NumberInput value={limit} min={1} max={100000} onChange={setLimit} />
@@ -81,15 +86,20 @@ function ColabFiles({ language }: { language: LanguageSummary }) {
           <input
             type="file"
             accept=".json"
+            multiple
             hidden
             onChange={async (event) => {
-              const file = event.target.files?.[0];
+              // Part files from an interrupted run can be uploaded together.
+              const selected = Array.from(event.target.files ?? []);
               event.target.value = '';
-              if (!file) return;
-              const result = await run(async () => api.colabResults(language.id, JSON.parse(await file.text())));
-              if (result) {
+              let saved = 0;
+              for (const file of selected) {
+                const result = await run(async () => api.colabResults(language.id, JSON.parse(await file.text())));
+                if (result) saved += result.saved;
+              }
+              if (selected.length) {
                 await refreshLanguages();
-                notify(`Saved ${result.saved} results`, 'success');
+                notify(`Saved ${saved.toLocaleString()} results from ${selected.length} file${selected.length === 1 ? '' : 's'}`, 'success');
               }
             }}
           />

@@ -3,6 +3,8 @@ import { refreshSentenceCounts, wordIdsOfSentences } from './ranking.js';
 import { registerEnglishWords } from './english.js';
 import { setWordExclusion } from './corpus.js';
 import { invalidateGlossIndex } from './glossIndex.js';
+import { fillChinesePinyin, isChinese } from './chinese.js';
+import { getLanguageConfig } from './languages.js';
 import { parseEnglish } from './util.js';
 
 export { parseEnglish };
@@ -176,6 +178,8 @@ export function saveDefinitions(db: DB, updates: DefinitionUpdate[], overwrite: 
   })();
   registerEnglishWords(glosses);
   invalidateGlossIndex();
+  // Chinese pronunciations are always shown in pinyin.
+  if (isChinese(getLanguageConfig(db))) fillChinesePinyin(db, updates.map((update) => update.id));
   return saved;
 }
 
