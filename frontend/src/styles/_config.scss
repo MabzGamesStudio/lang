@@ -1,0 +1,132 @@
+@use 'variables' as *;
+
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin-bottom: $space-lg;
+  border-bottom: 1px solid var(--border);
+
+  a {
+    padding: 0.55rem 1rem;
+    color: var(--text-muted);
+    text-decoration: none;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+
+    &:hover {
+      color: var(--text);
+    }
+
+    &.active {
+      color: var(--text);
+      border-bottom-color: var(--primary);
+    }
+
+    &.disabled {
+      opacity: 0.45;
+    }
+  }
+}
+
+.config-section {
+  > .row,
+  > .stack {
+    margin-top: $space-sm;
+  }
+
+  details {
+    margin-top: $space-md;
+
+    summary {
+      cursor: pointer;
+      color: var(--text-muted);
+      margin-bottom: $space-sm;
+    }
+  }
+
+  .test {
+    display: inline-flex;
+    align-items: center;
+    gap: $space-sm;
+  }
+}
+
+.games-toggle-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: $space-lg;
+  margin-top: $space-md;
+
+  h3 {
+    color: var(--phase);
+  }
+
+  .toggle {
+    display: flex;
+    margin-bottom: 0.35rem;
+    font-size: 0.9rem;
+  }
+}
+
+.label-queue {
+  display: grid;
+  grid-template-columns: minmax(200px, 360px) 1fr;
+  gap: $space-lg;
+  align-items: start;
+
+  img {
+    width: 100%;
+    max-height: 360px;
+    object-fit: contain;
+    border-radius: $radius-md;
+    background: var(--bg);
+  }
+
+  @media (max-width: 700px) {
+    grid-template-columns: 1fr;
+  }
+}
+
+.gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: $space-sm;
+  margin-bottom: $space-md;
+}
+
+.thumb {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.4rem;
+  border-radius: $radius-md;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+  text-align: left;
+
+  img {
+    width: 100%;
+    aspect-ratio: 1;
+    object-fit: cover;
+    border-radius: $radius-sm;
+  }
+
+  span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &:hover {
+    border-color: var(--primary);
+  }
+}
+
+.small-link {
+  font-size: 0.8rem;
+}

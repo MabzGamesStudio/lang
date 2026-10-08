@@ -27,3 +27,10 @@ yarn-error.log*
 **/images/
 *.db
 **/sentences/
+# App data: per-machine databases, audio, progress and API keys
+langData/languages/
+langData/english.sqlite*
+langData/settings.json
+langData/.legacy-imported
+*.sqlite
+*.sqlite-*

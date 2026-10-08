@@ -1,21 +1,96 @@
+@use 'variables' as *;
+
 .button {
-    padding: 0.6rem 1.1rem;
-    border-radius: 8px;
-    border: 1px solid var(--border);
-    background: var(--surface);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.55rem 1rem;
+  border-radius: $radius-sm;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: none;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
+  white-space: nowrap;
+
+  &:hover:not(:disabled) {
+    border-color: var(--primary);
+    text-decoration: none;
+  }
+
+  &:disabled,
+  &.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  &.primary {
+    background: var(--primary-strong);
+    border-color: var(--primary-strong);
+    color: white;
+
+    &:hover:not(:disabled) {
+      background: var(--primary);
+    }
+  }
+
+  &.danger {
+    border-color: rgba(239, 68, 68, 0.6);
+    color: #f87171;
+  }
+
+  &.small {
+    padding: 0.3rem 0.6rem;
+    font-size: 0.85rem;
+  }
+
+  &.big {
+    padding: 0.8rem 1.4rem;
+    font-size: 1.05rem;
+  }
+}
+
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.3rem;
+  border: none;
+  border-radius: $radius-sm;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    background: var(--surface-2);
     color: var(--text);
-    cursor: pointer;
-    transition: all 0.15s ease;
+  }
 
-    &:hover {
-        background: var(--primary);
-        color: white;
-        border-color: var(--primary);
-    }
+  &.danger:hover {
+    color: $wrong;
+  }
 
-    &.primary {
-        background: var(--primary);
-        color: white;
-        border-color: transparent;
-    }
+  &:disabled {
+    opacity: 0.4;
+  }
+}
+
+.link-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--primary);
+  font: inherit;
+  cursor: pointer;
+
+  &:hover {
+    text-decoration: underline;
+  }
 }

@@ -1,46 +1,43 @@
-import { BrowserRouter, Routes, Route } from "react-router-dom";
-import Menu from "./pages/Menu";
-import Minigames from "./pages/Minigames";
-import ForeignWordPickEnglishList from "./pages/minigamePages/ForeignWordPickEnglishList";
-import EnglishWordPickForeignList from "./pages/minigamePages/EnglishWordPickForeignList";
-import ForeignWordTypeEnglishWord from "./pages/minigamePages/ForeignWordTypeEnglishWord";
-import EnglishWordTypeForeignWord from "./pages/minigamePages/EnglishWordTypeForeignWord";
-import ImagePickForeignList from "./pages/minigamePages/ImagePickForeignList";
-import ImageTypeForeignWord from "./pages/minigamePages/ImageTypeForeignWord";
-import ListenForeignWordPickEnglishList from "./pages/minigamePages/ListenForeignWordPickEnglishList";
-import ListenEnglishWordPickForeignList from "./pages/minigamePages/ListenEnglishWordPickForeignList";
-import ListenForeignWordPickForeignList from "./pages/minigamePages/ListenForeignWordPickForeignList";
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { Loader2 } from 'lucide-react';
+import { AppProvider, useApp } from './state/AppContext';
+import Layout from './components/Layout';
+import MainMenu from './pages/MainMenu';
+import PlayPage from './pages/PlayPage';
+import ProgressPage from './pages/ProgressPage';
+import SessionPage from './pages/SessionPage';
+import ConfigPage from './pages/config/ConfigPage';
 
-function App() {
+function Routed() {
+  const { ready, languageId } = useApp();
+  if (!ready) {
     return (
-        <BrowserRouter>
-            <Routes>
-                <Route path="/" element={<Menu />} />
-                <Route path="/minigames" element={<Minigames />} />
-                <Route path="/minigames/foreignWordPickEnglishList" element={<ForeignWordPickEnglishList />} />
-                <Route path="/minigames/englishWordPickForeignList" element={<EnglishWordPickForeignList />} />
-                <Route path="/minigames/imagePickForeignList" element={<ImagePickForeignList />} />
-                <Route path="/minigames/foreignWordTypeEnglishWord" element={<ForeignWordTypeEnglishWord />} />
-                <Route path="/minigames/englishWordTypeForeignWord" element={<EnglishWordTypeForeignWord />} />
-                <Route path="/minigames/imageTypeForeignWord" element={<ImageTypeForeignWord />} />
-                <Route path="/minigames/listenForeignWordPickForeignList" element={<ListenForeignWordPickForeignList />} />
-                <Route path="/minigames/listenForeignWordPickEnglishList" element={<ListenForeignWordPickEnglishList />} />
-                <Route path="/minigames/listenEnglishWordPickForeignList" element={<ListenEnglishWordPickForeignList />} />
-
-                <Route path="*" element={<NotFoundPage />} />
-            </Routes>
-        </BrowserRouter>
+      <div className="splash">
+        <Loader2 className="spin" />
+      </div>
     );
+  }
+  return (
+    <Routes>
+      <Route element={<Layout />}>
+        <Route path="/" element={<MainMenu />} />
+        <Route path="/play/:gameId" element={<PlayPage key={languageId ?? ''} />} />
+        <Route path="/progress" element={<ProgressPage />} />
+        <Route path="/progress/session" element={<SessionPage key={languageId ?? ''} />} />
+        <Route path="/config" element={<ConfigPage />} />
+        <Route path="/config/:tab" element={<ConfigPage />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Route>
+    </Routes>
+  );
 }
 
-function NotFoundPage() {
-    return (
-        <div style={{ textAlign: 'center', marginTop: '50px' }}>
-            <h1>404 - Page Not Found</h1>
-            <p>The page you are looking for doesn't exist.</p>
-            <a href="/">Go Back Home</a>
-        </div>
-    );
+export default function App() {
+  return (
+    <BrowserRouter>
+      <AppProvider>
+        <Routed />
+      </AppProvider>
+    </BrowserRouter>
+  );
 }
-
-export default App;

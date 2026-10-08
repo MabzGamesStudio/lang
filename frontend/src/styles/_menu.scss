@@ -1,0 +1,134 @@
+@use 'variables' as *;
+
+.menu-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: $space-md;
+  margin-bottom: $space-lg;
+
+  .page-title {
+    margin: 0;
+  }
+
+  select {
+    font-size: 1.05rem;
+  }
+}
+
+.menu-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: $space-md;
+  margin-bottom: $space-xl;
+}
+
+.menu-action {
+  display: flex;
+  align-items: center;
+  gap: $space-md;
+  padding: $space-lg;
+  border-radius: $radius-lg;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  text-decoration: none;
+  transition:
+    transform 0.15s ease,
+    border-color 0.15s ease;
+
+  div {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+
+  strong {
+    font-size: 1.15rem;
+  }
+
+  &:hover {
+    transform: translateY(-2px);
+    border-color: var(--primary);
+    text-decoration: none;
+  }
+
+  &.primary {
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.3), rgba(52, 211, 153, 0.15));
+    border-color: rgba(129, 140, 248, 0.5);
+  }
+}
+
+.menu-section {
+  margin-bottom: $space-xl;
+
+  h2 {
+    display: flex;
+    align-items: baseline;
+    gap: $space-sm;
+    flex-wrap: wrap;
+    padding-bottom: $space-sm;
+    border-bottom: 1px solid var(--border);
+
+    .muted {
+      font-size: 0.9rem;
+      font-weight: 400;
+    }
+  }
+}
+
+.games-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: $space-md;
+}
+
+.game-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: $space-sm;
+  padding: $space-md;
+  text-align: left;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--phase);
+  border-radius: $radius-md;
+  cursor: pointer;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease;
+
+  &:hover:not(:disabled) {
+    transform: translateY(-3px);
+    box-shadow: var(--shadow);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .game-icons {
+    color: var(--phase);
+  }
+}
+
+.game-icons {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+
+  .arrow {
+    opacity: 0.6;
+  }
+}
+
+.welcome {
+  ol {
+    padding-left: 1.2rem;
+  }
+}

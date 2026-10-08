@@ -1,0 +1,154 @@
+@use 'variables' as *;
+
+input,
+select,
+textarea {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: $radius-sm;
+  padding: 0.5rem 0.65rem;
+  min-width: 0;
+
+  &:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(129, 140, 248, 0.2);
+  }
+}
+
+input[type='checkbox'] {
+  width: 1.05rem;
+  height: 1.05rem;
+  accent-color: var(--primary-strong);
+}
+
+textarea {
+  width: 100%;
+  resize: vertical;
+}
+
+.form,
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: $space-md;
+}
+
+.form label {
+  display: flex;
+  flex-direction: column;
+  gap: $space-xs;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: $space-md;
+  margin-bottom: $space-md;
+  align-items: end;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: $space-xs;
+
+  .field-label {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+  }
+
+  .hint {
+    font-size: 0.78rem;
+  }
+
+  input[type='number'] {
+    max-width: 9rem;
+  }
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: $space-sm $space-md;
+
+  &.end {
+    justify-content: flex-end;
+  }
+
+  > input {
+    flex: 1 1 220px;
+  }
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $space-sm;
+  align-items: center;
+  margin-bottom: $space-md;
+
+  input {
+    flex: 1 1 260px;
+  }
+}
+
+.two-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: $space-xl;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $space-xs;
+  margin-bottom: $space-sm;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.2rem 0.3rem 0.2rem 0.6rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+
+  button {
+    display: inline-flex;
+    border: none;
+    background: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 0.1rem;
+
+    &:hover {
+      color: $wrong;
+    }
+  }
+}
+
+.label-editor input {
+  width: 100%;
+}
+
+.tag {
+  margin-left: 0.4rem;
+  font-size: 0.7rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+}

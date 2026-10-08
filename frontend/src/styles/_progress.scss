@@ -1,0 +1,120 @@
+@use 'variables' as *;
+
+.stat-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: $space-md;
+  margin-bottom: $space-lg;
+}
+
+.stat {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  column-gap: $space-md;
+  align-items: center;
+  padding: $space-md $space-lg;
+  border-radius: $radius-lg;
+  background: var(--surface);
+  border: 1px solid var(--border);
+
+  svg {
+    grid-row: span 2;
+    color: var(--primary);
+  }
+
+  strong {
+    font-size: 1.8rem;
+  }
+
+  span {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+  }
+}
+
+.continue-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: $space-lg;
+
+  .card {
+    display: flex;
+    flex-direction: column;
+    gap: $space-sm;
+  }
+
+  .button.big {
+    align-self: flex-start;
+  }
+}
+
+.phase-progress {
+  display: flex;
+  flex-direction: column;
+  gap: $space-xs;
+}
+
+.phase-row {
+  display: grid;
+  grid-template-columns: 6.5rem 1fr 4.5rem;
+  align-items: center;
+  gap: $space-sm;
+  font-size: 0.9rem;
+}
+
+.level-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: $space-lg;
+
+  h3 {
+    color: var(--phase);
+  }
+}
+
+.bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 140px;
+  padding-top: 1.2rem;
+
+  .bar-col {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+    height: 100%;
+    min-width: 0;
+  }
+
+  .fill {
+    width: 100%;
+    min-height: 2px;
+    border-radius: 4px 4px 0 0;
+    background: var(--phase, var(--primary));
+  }
+
+  .value {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+  }
+
+  .label {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+    margin-top: 2px;
+  }
+
+  &.activity .label {
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    height: 2.6rem;
+  }
+}
