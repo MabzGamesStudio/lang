@@ -5,6 +5,18 @@ const COMBINING_DIACRITICS = /[̀-ͯ]/g;
 const PUNCTUATION = /[\p{P}\p{S}]+/gu;
 const LEADING_FUNCTION_WORDS = /^(?:to|a|an|the)\s+/;
 
+// Removes explanatory notes in parentheses or brackets ("(he/she) said",
+// "el (m)", "（量词）"). They are shown to the learner but never spoken and
+// never required when typing.
+export function stripParentheticals(text: string): string {
+  const stripped = text
+    .replace(/\s*[(\[（【][^)\]）】]*[)\]）】]/g, ' ')
+    .replace(/\s+([.,;:!?。，！？])/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return stripped || text.trim();
+}
+
 export function normalizeForCompare(text: string, locale?: string): string {
   return text
     .normalize('NFC')
@@ -101,11 +113,7 @@ export function glossKey(text: string): string {
 export function glossVariants(text: string): string[] {
   const lower = text.toLowerCase();
   const variants = new Set<string>();
-  const candidates = [
-    lower,
-    lower.replace(/\([^)]*\)|\[[^\]]*\]/g, ' '),
-    lower.replace(/[()[\]]/g, ' '),
-  ];
+  const candidates = [lower, stripParentheticals(lower), lower.replace(/[()[\]（）【】]/g, ' ')];
   for (const candidate of candidates) {
     const normalized = normalizeForCompare(candidate, 'en');
     if (!normalized) continue;
@@ -173,8 +181,8 @@ function compareForms(input: string, expected: string, options: MatchOptions): M
 
 function forms(text: string, options: MatchOptions): string[] {
   if (options.side === 'english') return glossVariants(text);
-  const normalized = normalizeForCompare(text, options.locale);
-  return normalized ? [normalized] : [];
+  const variants = [text, stripParentheticals(text)].map((variant) => normalizeForCompare(variant, options.locale));
+  return [...new Set(variants)].filter(Boolean);
 }
 
 // Finds the best accepted answer for a typed input.
@@ -308,7 +316,7 @@ export function spokenWordSimilarity(alternatives: string[], accepted: string[],
   let best = 0;
   for (const heard of alternatives) {
     const heardTokens = normalizedTokens(heard, locale);
-    for (const answer of accepted) {
+    for (const answer of accepted.map(stripParentheticals)) {
       const expected = stripDiacritics(normalizeForCompare(answer, locale));
       const candidates = [heardTokens.join(' '), ...heardTokens];
       for (const candidate of candidates) {

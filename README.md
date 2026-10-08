@@ -23,7 +23,7 @@ Then, in the app:
 
 1. **Configuration → Language**: add a language (e.g. Spanish).
 2. **Configuration → Sources**: click *Import 3 popular Spanish books* (Project Gutenberg), or paste a URL, a text, or upload a word list such as `langData/spanish/1000Words/1000Words.csv`.
-3. **Configuration → Services**: pick where translations, pronunciations and audio come from (see below), then use **Autopilot** to prepare the top N words in one click.
+3. **Configuration → Services**: pick where translations, pronunciations and audio come from (see below), then use **Autopilot** to prepare the next N words that have no definition yet. Run it again for the next batch; it shows how many words are still undefined.
 4. **Personal progress → Continue learning**.
 
 ### Development
@@ -82,6 +82,8 @@ Words are tokenised with `Intl.Segmenter`, so languages without spaces (Japanese
 | Extra example sentences | **LLM** (for words with too few sentences) |
 | Text to speech (cached in the database) | **On device** (browser voices), **Google Colab** (neural voices), **OpenAI-compatible** speech API, **Google Cloud TTS** |
 | Speech recognition | **Browser** (Chrome/Edge), **Google Colab** (Whisper), any **Whisper-compatible API** |
+
+Notes in parentheses — “(he/she) said”, “perro (m)” — are shown but never spoken and never required when typing.
 
 The LLM can be an open-source model in Google Colab, any OpenAI-compatible API (OpenAI, OpenRouter, Groq, local Ollama…) or Anthropic Claude.
 

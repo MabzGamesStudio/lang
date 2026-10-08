@@ -43,6 +43,22 @@ function JobButton({ label, icon, start, disabled }: { label: string; icon?: Rea
   );
 }
 
+// How many words still wait for a definition (updates while jobs run).
+function UndefinedCount({ language }: { language: LanguageSummary }) {
+  const missing = language.wordCount - language.definedWordCount;
+  return (
+    <p className={missing > 0 ? 'undefined-count' : 'muted'}>
+      {missing > 0 ? (
+        <>
+          <strong>{missing.toLocaleString()}</strong> of {language.wordCount.toLocaleString()} words have no definition yet.
+        </>
+      ) : (
+        `All ${language.wordCount.toLocaleString()} words have a definition.`
+      )}
+    </p>
+  );
+}
+
 function ColabFiles({ language }: { language: LanguageSummary }) {
   const run = useAction();
   const { refreshLanguages, notify } = useApp();
@@ -138,15 +154,22 @@ export default function ServicesTab() {
     <>
       <Section
         title="Autopilot"
-        description="Prepares the most frequent words in one go: definitions and pronunciation, sentence translations, extra example sentences and audio — using whichever services are configured below. Personal progress also prepares each new block automatically in the background."
+        description="Takes the next most frequent words that have no definition yet and prepares them in one go: definitions and pronunciation, sentence translations, extra example sentences and audio — using whichever services are configured below. Run it again for the next batch. Personal progress also prepares each new block automatically in the background."
       >
         {language ? (
-          <div className="row">
-            <Field label="Words">
-              <NumberInput value={counts.autopilot} min={7} max={50000} onChange={(value) => setCounts({ ...counts, autopilot: value })} />
-            </Field>
-            <JobButton icon={<Rocket size={16} />} label={`Prepare the top ${counts.autopilot} ${language.name} words`} start={() => api.autopilot(language.id, counts.autopilot)} />
-          </div>
+          <>
+            <UndefinedCount language={language} />
+            <div className="row">
+              <Field label="Words">
+                <NumberInput value={counts.autopilot} min={7} max={50000} onChange={(value) => setCounts({ ...counts, autopilot: value })} />
+              </Field>
+              <JobButton
+                icon={<Rocket size={16} />}
+                label={`Prepare the next ${counts.autopilot} words without a definition`}
+                start={() => api.autopilot(language.id, counts.autopilot)}
+              />
+            </div>
+          </>
         ) : (
           <p className="muted">Add a language first.</p>
         )}
@@ -190,6 +213,7 @@ export default function ServicesTab() {
             <NumberInput value={draft.definitions.batchSize} min={5} max={200} onChange={(value) => update((s) => void (s.definitions.batchSize = value))} />
           </Field>
         </div>
+        {language && <UndefinedCount language={language} />}
         {language && (
           <div className="row">
             <Field label="Next words">
@@ -197,7 +221,7 @@ export default function ServicesTab() {
             </Field>
             <JobButton
               icon={<BookA size={16} />}
-              label={`Fetch definitions for the next ${counts.definitions} words`}
+              label={`Fetch definitions for the next ${counts.definitions} words without one`}
               start={() => api.fetchDefinitions(language.id, counts.definitions)}
               disabled={draft.definitions.provider === 'llm' && !llmReady}
             />

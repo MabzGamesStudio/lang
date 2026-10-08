@@ -179,6 +179,24 @@ export function saveDefinitions(db: DB, updates: DefinitionUpdate[], overwrite: 
   return saved;
 }
 
+export function undefinedWordCount(db: DB): number {
+  return (
+    db.prepare(`SELECT COUNT(*) AS n FROM words WHERE active = 1 AND rank IS NOT NULL AND english IS NULL`).get() as { n: number }
+  ).n;
+}
+
+// Words the autopilot works on next: the most frequent words that have no
+// definition yet. Once every word is defined, the most frequent words that
+// still lack translated example sentences.
+export function nextWordsToPrepare(db: DB, limit: number): { wordIds: number[]; needDefinitions: boolean } {
+  const needDefinitions = undefinedWordCount(db) > 0;
+  const condition = needDefinitions ? 'english IS NULL' : 'translated_sentence_count < 2';
+  const rows = db
+    .prepare(`SELECT id FROM words WHERE active = 1 AND rank IS NOT NULL AND ${condition} ORDER BY rank LIMIT ?`)
+    .all(limit) as { id: number }[];
+  return { wordIds: rows.map((row) => row.id), needDefinitions };
+}
+
 export function updateWord(
   langId: string,
   id: number,

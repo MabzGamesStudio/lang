@@ -96,9 +96,7 @@ export default function WordsTab({ language }: { language: LanguageSummary }) {
               <td>{word.english.join('; ') || <span className="muted">—</span>}</td>
               <td className="ipa">{word.pronunciation ?? ''}</td>
               <td>{word.count.toLocaleString()}</td>
-              <td>
-                {word.translatedSentenceCount}/{word.sentenceCount}
-              </td>
+              <td title={`${word.translatedSentenceCount} of them translated`}>{word.sentenceCount}</td>
               <td>
                 <LevelDots levels={word.levels} />
               </td>

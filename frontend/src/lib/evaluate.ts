@@ -4,6 +4,7 @@ import {
   normalizeForCompare,
   normalizedTokens,
   spokenWordSimilarity,
+  stripParentheticals,
   type AlignedToken,
 } from '../../../shared/text';
 import type { LearningSettings, Question, WordResult } from '../../../shared/types';
@@ -92,7 +93,7 @@ function sentenceOutcome(
   const foreignAnswer = question.response.side === 'foreign';
   const expected = foreignAnswer
     ? sentence.tokens.map((token) => normalizeForCompare(token.text, locale))
-    : normalizedTokens(question.answer, 'en');
+    : normalizedTokens(stripParentheticals(question.answer), 'en');
   const alignment = alignTokens(expected, actual, { accentLenient, closeSimilarity });
   const correct = alignment.score >= threshold;
   const results: WordResult[] = [];

@@ -1,4 +1,28 @@
-import { useEffect, type RefObject } from 'react';
+import { useCallback, useEffect, type Dispatch, type RefObject, type SetStateAction } from 'react';
+import type { LanguageSummary } from '../../../shared/types';
+
+// Letters offered as buttons: the language's own list, or the automatic one.
+export function typingCharacters(language: LanguageSummary): string[] {
+  return language.extraCharacters.length ? language.extraCharacters : language.autoCharacters;
+}
+
+// Inserts text at the cursor of a controlled input and keeps the focus there.
+export function useInsertAtCursor(inputRef: RefObject<HTMLInputElement | null>, setValue: Dispatch<SetStateAction<string>>) {
+  return useCallback(
+    (char: string) => {
+      const input = inputRef.current;
+      if (!input) return;
+      const start = input.selectionStart ?? input.value.length;
+      const end = input.selectionEnd ?? start;
+      setValue((current) => current.slice(0, start) + char + current.slice(end));
+      requestAnimationFrame(() => {
+        input.focus();
+        input.setSelectionRange(start + char.length, start + char.length);
+      });
+    },
+    [inputRef, setValue]
+  );
+}
 
 // One-click buttons for letters that are hard to type (ñ, é, ü...).
 // While the answer box is focused, digits 1-9/0 insert them.
