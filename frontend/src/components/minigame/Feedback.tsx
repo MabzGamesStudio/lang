@@ -198,7 +198,7 @@ export default function Feedback({
               onChange={setRetyped}
               onEnter={checkRetype}
               inputRef={retypeRef}
-              className={retypeOk ? 'correct' : ''}
+              className={`side-foreign ${retypeOk ? 'correct' : ''}`}
               placeholder="Type the correct answer to continue"
               readOnly={retypeOk}
               showHelp={false}
@@ -215,7 +215,7 @@ export default function Feedback({
                 checkRetype(retyped);
               }}
               placeholder="Type the correct answer to continue"
-              className={retypeOk ? 'correct' : ''}
+              className={`side-english ${retypeOk ? 'correct' : ''}`}
               lang="en"
             />
           )}
