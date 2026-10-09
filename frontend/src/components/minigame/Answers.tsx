@@ -41,7 +41,7 @@ export function ChoiceAnswer({ question, language, disabled, outcome, onAnswer }
   );
 
   return (
-    <div className={`choices count-${options.length}`}>
+    <div className={`choices count-${options.length} side-${question.response.side}`}>
       {options.map((option, index) => {
         let state = '';
         if (outcome) {
@@ -78,7 +78,7 @@ export function TypedAnswer({ question, language, settings, disabled, outcome, o
     if (disabled || outcome || !text.trim()) return;
     onAnswer(evaluateTyped(question, text, language.locale || language.code, settings.learning));
   };
-  const className = `answer-input ${outcome ? (outcome.correct ? 'correct' : 'wrong') : ''} ${question.sentence ? 'sentence' : ''}`;
+  const className = `answer-input side-${question.response.side} ${outcome ? (outcome.correct ? 'correct' : 'wrong') : ''} ${question.sentence ? 'sentence' : ''}`;
 
   return (
     <div className="typed-answer">
@@ -185,7 +185,7 @@ export function SpokenAnswer({ question, language, settings, disabled, outcome, 
           This window has no built-in speech recognition. Choose Google Colab or a Whisper API under Configuration → Services → Speech recognition, open the app in Chrome, or turn off speaking minigames in Configuration → Learning.
         </p>
       ) : (
-        <button className={`mic-button ${listening ? 'listening' : ''}`} onClick={() => (listening ? listening.stop() : void listen())} disabled={disabled || Boolean(outcome)}>
+        <button className={`mic-button side-${question.response.side} ${listening ? 'listening' : ''}`} onClick={() => (listening ? listening.stop() : void listen())} disabled={disabled || Boolean(outcome)}>
           {listening ? <MicOff size={36} /> : <Mic size={36} />}
           <span>{listening ? 'Listening… (Space to stop)' : `Speak in ${foreign ? language.name : 'English'} (Space)`}</span>
           {listening && (

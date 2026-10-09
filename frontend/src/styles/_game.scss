@@ -1,5 +1,15 @@
 @use 'variables' as *;
 
+// Language colours: whatever is in English (question or answer) has a blue
+// border, whatever is in the foreign language a red one.
+.side-english {
+  --side: var(--english);
+}
+
+.side-foreign {
+  --side: var(--foreign);
+}
+
 .play-header {
   display: flex;
   flex-wrap: wrap;
@@ -169,7 +179,7 @@
   padding: $space-xl $space-lg;
   border-radius: $radius-lg;
   background: var(--surface);
-  border: 1px solid var(--border);
+  border: 2px solid var(--side, var(--border));
   text-align: center;
   margin-bottom: $space-lg;
 
@@ -178,9 +188,10 @@
     top: 0.6rem;
     left: 0.9rem;
     font-size: 0.75rem;
+    font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    color: var(--text-muted);
+    color: var(--side, var(--text-muted));
   }
 
   .prompt-text {
@@ -269,7 +280,7 @@
   gap: $space-md;
   padding: 1rem 1.2rem;
   border-radius: $radius-md;
-  border: 1px solid var(--border);
+  border: 2px solid var(--side, var(--border));
   background: var(--surface);
   color: var(--text);
   font: inherit;
@@ -280,8 +291,9 @@
     background 0.15s ease,
     border-color 0.15s ease;
 
-  &:hover:not(:disabled) {
-    border-color: var(--primary);
+  &:hover:not(:disabled):not(.correct):not(.wrong):not(.dim) {
+    border-color: var(--side, var(--primary));
+    background: var(--surface-2);
   }
 
   kbd {
@@ -322,7 +334,13 @@
   font-size: 2rem;
   text-align: center;
   border-width: 2px;
+  border-color: var(--side, var(--border));
   border-radius: $radius-md;
+
+  &:focus {
+    border-color: var(--side, var(--primary));
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--side, var(--primary)) 25%, transparent);
+  }
 
   &.sentence {
     font-size: 1.3rem;
@@ -544,14 +562,15 @@
   min-width: 260px;
   padding: $space-lg;
   border-radius: $radius-lg;
-  border: 2px solid var(--border);
+  border: 2px solid var(--side, var(--border));
   background: var(--surface);
   color: var(--text);
   font: inherit;
   cursor: pointer;
 
   &:hover:not(:disabled) {
-    border-color: var(--primary);
+    border-color: var(--side, var(--primary));
+    background: var(--surface-2);
   }
 
   &.listening {
@@ -642,6 +661,13 @@
   .retype input {
     width: 100%;
     font-size: 1.2rem;
+    border-width: 2px;
+    border-color: var(--side, var(--border));
+
+    &:focus {
+      border-color: var(--side, var(--primary));
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--side, var(--primary)) 25%, transparent);
+    }
 
     &.correct {
       border-color: $correct;

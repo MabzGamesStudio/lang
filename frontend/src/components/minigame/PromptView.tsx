@@ -74,7 +74,7 @@ export default function PromptView({
   const textProps = isForeign ? { lang: language.code, dir: language.rtl ? 'rtl' : 'ltr' } : { lang: 'en' };
 
   return (
-    <div className={`prompt prompt-${prompt.mode} ${question.sentence ? 'sentence' : 'word'}`}>
+    <div className={`prompt prompt-${prompt.mode} side-${prompt.side} ${question.sentence ? 'sentence' : 'word'}`}>
       <div className="prompt-kind">{isForeign ? language.name : 'English'}</div>
       {prompt.mode === 'text' &&
         (prompt.memorize && revealed ? (
