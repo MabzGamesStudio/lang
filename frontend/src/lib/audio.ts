@@ -35,6 +35,13 @@ function fetchAudioUrl(target: string, text: string): Promise<string | null> {
   return pending;
 }
 
+// Forgets the audio fetched so far, e.g. after recordings were regenerated.
+export function clearAudioCache(): void {
+  const playing = current?.src;
+  for (const pending of urls.values()) void pending.then((url) => url && url !== playing && URL.revokeObjectURL(url));
+  urls.clear();
+}
+
 export function prefetchAudio(target: string, text: string): void {
   const clean = stripParentheticals(text);
   if (clean) void fetchAudioUrl(target, clean);

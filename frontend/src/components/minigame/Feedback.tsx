@@ -6,24 +6,34 @@ import { useKey } from '../../lib/hooks';
 import { bestMatch } from '../../../../shared/text';
 import { voiceFor } from './PromptView';
 import ForeignInput from '../typing/ForeignInput';
+import SentenceWords from './SentenceWords';
 import type { AppSettings, LanguageSummary, Question, QuestionWord } from '../../../../shared/types';
 
-function SentenceDiff({ outcome }: { outcome: Outcome }) {
+// `counts`: for answers in the foreign language, which words are scored.
+// Words that are not (names, words not met yet) are shown muted.
+function SentenceDiff({ outcome, counts }: { outcome: Outcome; counts?: boolean[] }) {
   if (!outcome.alignment) return null;
   return (
     <div className="diff">
       {outcome.alignment.map((token, index) => {
+        const muted = counts && token.expectedIndex !== null && !counts[token.expectedIndex] ? ' uncounted' : '';
         if (token.status === 'extra') return <del key={index}>{token.actual}</del>;
-        if (token.status === 'missing') return <ins key={index}>{token.expected}</ins>;
+        if (token.status === 'missing') {
+          return (
+            <ins key={index} className={muted.trim() || undefined}>
+              {token.expected}
+            </ins>
+          );
+        }
         if (token.status === 'wrong') {
           return (
-            <span key={index} className="wrong">
+            <span key={index} className={`wrong${muted}`}>
               <del>{token.actual}</del> <ins>{token.expected}</ins>
             </span>
           );
         }
         return (
-          <span key={index} className={token.status}>
+          <span key={index} className={`${token.status}${muted}`}>
             {token.actual}
           </span>
         );
@@ -169,7 +179,10 @@ export default function Feedback({
       )}
       {question.sentence && (
         <div className="sentence-feedback">
-          <SentenceDiff outcome={outcome} />
+          <SentenceDiff
+            outcome={outcome}
+            counts={question.response.side === 'foreign' ? question.sentence.tokens.map((token) => token.evaluate) : undefined}
+          />
           <div className="pair">
             <button className="icon-button" onClick={() => playForeign(question.sentence!.text)} title="Listen">
               <Volume2 size={18} />
@@ -177,6 +190,7 @@ export default function Feedback({
             <span lang={language.code}>{question.sentence.text}</span>
           </div>
           {question.sentence.english && <div className="pair muted">{question.sentence.english}</div>}
+          <SentenceWords questionKey={question.key} tokens={question.sentence.tokens} language={language} />
         </div>
       )}
       {outcome.note && <div className="note">{outcome.note}</div>}

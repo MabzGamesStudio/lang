@@ -31,6 +31,7 @@ export interface LanguageSummary extends LanguageConfig {
   definedWordCount: number;
   sentenceCount: number;
   translatedSentenceCount: number;
+  excludedSentenceCount: number;
   learnedCount: number;
   dueCount: number;
   sourceCount: number;
@@ -67,6 +68,9 @@ export interface WordRow {
   lastSeenAt: number | null;
 }
 
+// Why a sentence was taken out of the questions.
+export type SentenceExclusion = 'translation' | 'nonsense' | 'audio' | 'other';
+
 export interface SentenceRow {
   id: number;
   text: string;
@@ -75,6 +79,13 @@ export interface SentenceRow {
   sourceId: number | null;
   wordCount: number;
   maxRank: number | null;
+  excludedReason: SentenceExclusion | null;
+  excludedAt: number | null;
+  // Where the stored audio of the sentence (and of its translation) came from:
+  // the voice key, e.g. "colab:es-ES-ElviraNeural". null: not generated.
+  audioVoice: string | null;
+  audioAt: number | null;
+  englishAudioVoice: string | null;
 }
 
 export interface SourceRow {
@@ -115,6 +126,9 @@ export interface SentenceToken {
   wordId: number | null;
   evaluate: boolean;
   target: boolean;
+  // Why a word is not scored: not counted (a name or excluded word), not met
+  // yet, or further on in the vocabulary.
+  skip?: 'excluded' | 'unseen' | 'later';
 }
 
 export interface QuestionWord {
@@ -190,6 +204,8 @@ export interface ResultsResponse {
   learned: number[];
   reviewed: number[];
   levels: Record<number, WordLevels>;
+  // Takes these results back (when the question is reported as bad).
+  undoId: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -219,7 +235,7 @@ export interface ProgressSummary {
 export type LlmProvider = 'none' | 'colab' | 'openai' | 'anthropic';
 export type DefinitionProvider = 'llm' | 'wiktionary';
 export type TranslationProvider = 'llm' | 'deepl' | 'google' | 'libretranslate';
-export type TtsProvider = 'browser' | 'colab' | 'openai' | 'google';
+export type TtsProvider = 'browser' | 'colab' | 'openai' | 'google' | 'azure' | 'elevenlabs';
 export type SttProvider = 'browser' | 'colab' | 'openai';
 
 export type BatchPreviewMode = 'every' | 'new' | 'off';
@@ -274,6 +290,8 @@ export interface AppSettings {
     provider: TtsProvider;
     openai: { baseUrl: string; apiKey: string; model: string; voice: string };
     google: { apiKey: string };
+    azure: { apiKey: string; region: string };
+    elevenlabs: { apiKey: string; model: string; voice: string; baseUrl: string };
     englishVoice: string;
     rate: number;
   };

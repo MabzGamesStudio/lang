@@ -8,7 +8,7 @@ import { wordIdFor } from '../services/corpus.js';
 import { tokenize, tidySentence } from '../services/textProcessing.js';
 import type { JobContext } from '../services/jobs.js';
 import { chat, extractItems, llmAvailable, llmLabel } from './llm.js';
-import type { LanguageConfig } from '../../../shared/types.js';
+import type { LanguageConfig, TranslationProvider } from '../../../shared/types.js';
 
 interface SentenceToTranslate {
   id: number;
@@ -25,12 +25,12 @@ export function sentencesNeedingTranslation(
     const perWord = options.perWord ?? 4;
     const statement = db.prepare(
       `SELECT s.id, s.text FROM sentences s
-       WHERE s.english IS NULL AND s.id IN (SELECT sentence_id FROM sentence_words WHERE word_id = ?)
+       WHERE s.english IS NULL AND s.excluded_reason IS NULL AND s.id IN (SELECT sentence_id FROM sentence_words WHERE word_id = ?)
        ORDER BY s.max_rank IS NULL, s.max_rank, s.word_count LIMIT ?`
     );
     const translatedCount = db.prepare(
       `SELECT COUNT(DISTINCT sw.sentence_id) AS n FROM sentence_words sw JOIN sentences s ON s.id = sw.sentence_id
-       WHERE sw.word_id = ? AND s.english IS NOT NULL`
+       WHERE sw.word_id = ? AND s.english IS NOT NULL AND s.excluded_reason IS NULL`
     );
     const chosen = new Map<number, SentenceToTranslate>();
     for (const wordId of options.wordIds) {
@@ -42,25 +42,37 @@ export function sentencesNeedingTranslation(
   }
   return db
     .prepare(
-      `SELECT id, text FROM sentences WHERE english IS NULL AND max_rank IS NOT NULL
+      `SELECT id, text FROM sentences WHERE english IS NULL AND excluded_reason IS NULL AND max_rank IS NOT NULL
        ORDER BY max_rank, word_count LIMIT ?`
     )
     .all(options.limit ?? 100) as SentenceToTranslate[];
 }
 
-async function translateWithLlm(sentences: SentenceToTranslate[], config: LanguageConfig): Promise<Map<number, string>> {
-  const items = sentences.map((sentence, index) => ({ id: index + 1, text: sentence.text }));
+// `reported`: translations a learner marked as wrong, to be replaced.
+async function translateWithLlm(
+  sentences: SentenceToTranslate[],
+  config: LanguageConfig,
+  reported?: Map<number, string>
+): Promise<Map<number, string>> {
+  const items = sentences.map((sentence, index) => ({
+    id: index + 1,
+    text: sentence.text,
+    ...(reported?.get(sentence.id) ? { reported: reported.get(sentence.id) } : {}),
+  }));
+  const instructions = reported
+    ? `A learner reported the English translations given as "reported" as wrong. Translate each ${config.name} sentence again into natural, faithful English. Keep the meaning and tone, do not add explanations, and do not repeat a reported translation unless it is really correct.`
+    : `Translate each ${config.name} sentence into natural, faithful English. Keep the meaning and tone, do not add explanations.`;
   const reply = await chat(
     [
       { role: 'system', content: `You are a professional ${config.name}-to-English translator.` },
       {
         role: 'user',
-        content: `Translate each ${config.name} sentence into natural, faithful English. Keep the meaning and tone, do not add explanations.
+        content: `${instructions}
 Return only JSON: {"items":[{"id":1,"english":"..."}]} with one item per sentence.
 ${JSON.stringify(items)}`,
       },
     ],
-    { temperature: 0.1 }
+    { temperature: reported ? 0.3 : 0.1 }
   );
   const result = new Map<number, string>();
   for (const item of extractItems<{ id?: unknown; english?: unknown }>(reply)) {
@@ -70,9 +82,8 @@ ${JSON.stringify(items)}`,
   return result;
 }
 
-async function translateWithApi(texts: string[], config: LanguageConfig): Promise<string[]> {
+async function translateWithApi(texts: string[], config: LanguageConfig, provider: TranslationProvider): Promise<string[]> {
   const settings = getSettings();
-  const { provider } = settings.translation;
   if (provider === 'deepl') {
     const key = settings.translation.deepl.apiKey;
     if (!key) throw new HttpError(400, 'Add a DeepL API key in Configuration → Services.');
@@ -107,24 +118,28 @@ async function translateWithApi(texts: string[], config: LanguageConfig): Promis
   throw new HttpError(400, `Unknown translation provider "${provider}"`);
 }
 
-export async function translateBatch(sentences: SentenceToTranslate[], config: LanguageConfig): Promise<Map<number, string>> {
-  const settings = getSettings();
-  if (settings.translation.provider === 'llm') return translateWithLlm(sentences, config);
+export async function translateBatch(
+  sentences: SentenceToTranslate[],
+  config: LanguageConfig,
+  provider: TranslationProvider = getSettings().translation.provider,
+  reported?: Map<number, string>
+): Promise<Map<number, string>> {
+  if (provider === 'llm') return translateWithLlm(sentences, config, reported);
   const translated = await translateWithApi(
     sentences.map((s) => s.text),
-    config
+    config,
+    provider
   );
   return new Map(sentences.map((sentence, index) => [sentence.id, translated[index] ?? '']));
 }
 
-export function translationLabel(): string {
-  const settings = getSettings();
-  return settings.translation.provider === 'llm' ? llmLabel(settings) : settings.translation.provider;
+export function translationLabel(provider: TranslationProvider = getSettings().translation.provider): string {
+  return provider === 'llm' ? llmLabel(getSettings()) : provider;
 }
 
-export function translationAvailable(): boolean {
+export function translationAvailable(provider: TranslationProvider = getSettings().translation.provider): boolean {
   const settings = getSettings();
-  switch (settings.translation.provider) {
+  switch (provider) {
     case 'llm':
       return llmAvailable(settings);
     case 'deepl':
@@ -171,6 +186,79 @@ export async function translateSentences(
   }
   ctx?.progress(sentences.length, sentences.length);
   return `Translated ${saved} of ${sentences.length} sentences${failures.length ? ` (${failures.length} batches failed: ${failures[0]})` : ''}`;
+}
+
+// ---------------------------------------------------------------------------
+// Fixing translations a learner reported as wrong: a separate job from
+// translating new sentences. The old translation is replaced; a sentence whose
+// new translation comes back the same stays out of the questions.
+
+function sameTranslation(a: string, b: string): boolean {
+  const norm = (text: string) => text.toLowerCase().replace(/[.!?¡¿"“”'’]/g, '').replace(/\s+/g, ' ').trim();
+  return norm(a) === norm(b);
+}
+
+export async function retranslateSentences(
+  langId: string,
+  options: { ids?: number[]; provider?: TranslationProvider },
+  ctx?: JobContext
+): Promise<string> {
+  const db = languageDb(langId);
+  const config = getLanguageConfig(db);
+  const settings = getSettings();
+  const provider = options.provider ?? settings.translation.provider;
+  if (!translationAvailable(provider)) {
+    throw new HttpError(400, `${provider === 'llm' ? 'The language model' : provider} is not set up for translations (Configuration → Services).`);
+  }
+  const rows = (
+    options.ids?.length
+      ? db.prepare(`SELECT id, text, english FROM sentences WHERE id IN (SELECT value FROM json_each(?))`).all(JSON.stringify(options.ids))
+      : db
+          .prepare(`SELECT id, text, english FROM sentences WHERE excluded_reason = 'translation' ORDER BY max_rank IS NULL, max_rank`)
+          .all()
+  ) as { id: number; text: string; english: string | null }[];
+  if (rows.length === 0) return 'No sentences are marked as badly translated';
+  const batchSize = Math.max(1, provider === 'llm' ? settings.translation.batchSize : 40);
+  const label = translationLabel(provider);
+  const save = db.prepare(
+    `UPDATE sentences SET english = ?, translation_source = ?,
+       excluded_at = CASE WHEN excluded_reason = 'translation' THEN NULL ELSE excluded_at END,
+       excluded_reason = CASE WHEN excluded_reason = 'translation' THEN NULL ELSE excluded_reason END
+     WHERE id = ?`
+  );
+  let fixed = 0;
+  let unchanged = 0;
+  const failures: string[] = [];
+  for (let start = 0; start < rows.length; start += batchSize) {
+    ctx?.checkCancelled();
+    ctx?.progress(start, rows.length, `Translating again (${start}/${rows.length})…`);
+    const batch = rows.slice(start, start + batchSize);
+    try {
+      const reported = new Map(batch.filter((row) => row.english).map((row) => [row.id, row.english!]));
+      const translations = await translateBatch(batch, config, provider, reported.size ? reported : undefined);
+      db.transaction(() => {
+        for (const row of batch) {
+          const english = translations.get(row.id)?.replace(/\s+/g, ' ').trim();
+          if (!english) continue;
+          if (row.english && sameTranslation(english, row.english)) {
+            unchanged++;
+            continue;
+          }
+          save.run(english, label, row.id);
+          fixed++;
+        }
+      })();
+    } catch (error) {
+      failures.push((error as Error).message);
+      if (fixed === 0 && failures.length >= 3) throw new Error(`Translation failed: ${failures[0]}`);
+    }
+  }
+  ctx?.progress(rows.length, rows.length);
+  refreshSentenceCounts(db, wordIdsOfSentences(db, rows.map((row) => row.id)));
+  const parts = [`Translated ${fixed} sentence${fixed === 1 ? '' : 's'} again`];
+  if (unchanged) parts.push(`${unchanged} came back the same and stay excluded: edit them by hand or try another service`);
+  if (failures.length) parts.push(`${failures.length} batches failed: ${failures[0]}`);
+  return parts.join('; ');
 }
 
 // ---------------------------------------------------------------------------

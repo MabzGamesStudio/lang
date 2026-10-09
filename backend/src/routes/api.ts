@@ -28,6 +28,8 @@ import {
   undefinedWordCount,
   listSentences,
   listWords,
+  SENTENCE_EXCLUSIONS,
+  setSentenceExclusion,
   resetWordProgress,
   saveDefinitions,
   saveSentenceTranslations,
@@ -53,6 +55,7 @@ import {
   progressSummary,
   resetProgress,
   sessionNext,
+  undoResults,
   type NextRequest,
 } from '../services/progress.js';
 import { exportEnglish, exportLanguage, importEnglish, importLanguage } from '../services/backup.js';
@@ -62,16 +65,20 @@ import { importLegacy, legacyAlreadyImported, legacyAvailable } from '../service
 import { fetchDefinitions } from '../providers/definitions.js';
 import {
   generateSentences,
+  retranslateSentences,
   sentencesNeedingTranslation,
   translateBatch,
   translateSentences,
   translationAvailable,
 } from '../providers/translation.js';
-import { getAudio, pregenerateAudio, transcribe, ttsGenerates } from '../providers/speech.js';
+import { getAudio, pregenerateAudio, regenerateSentenceAudio, transcribe, ttsGenerates } from '../providers/speech.js';
 import { suggestImages } from '../providers/images.js';
 import { chat, judgeTranslation, llmAvailable } from '../providers/llm.js';
 import { PHASES, isGameId, type GameId } from '../../../shared/games.js';
-import type { WordResult } from '../../../shared/types.js';
+import type { SentenceExclusion, TranslationProvider, TtsProvider, WordResult } from '../../../shared/types.js';
+
+const TRANSLATION_PROVIDERS: TranslationProvider[] = ['llm', 'deepl', 'google', 'libretranslate'];
+const TTS_PROVIDERS: TtsProvider[] = ['colab', 'openai', 'google', 'azure', 'elevenlabs'];
 
 function intParam(value: unknown, fallback: number, min = 0, max = 1_000_000): number {
   const parsed = Number(value);
@@ -359,6 +366,49 @@ export function apiRouter(): Router {
     res.json({ ok: true });
   });
 
+  // Takes a sentence out of the questions with a reason. When the question was
+  // already answered, its results are taken back as well (undoId).
+  api.post('/languages/:lang/sentences/:sentence/exclude', (req, res) => {
+    const id = lang(req);
+    const reason = str(req.body?.reason) as SentenceExclusion;
+    if (!SENTENCE_EXCLUSIONS.includes(reason)) throw new HttpError(400, 'Unknown reason');
+    setSentenceExclusion(id, intParam(req.params.sentence, 0), reason);
+    const undoId = str(req.body?.undoId);
+    res.json({ ok: true, undone: undoId ? undoResults(id, undoId) : false });
+  });
+
+  api.post('/languages/:lang/sentences/:sentence/restore', (req, res) => {
+    setSentenceExclusion(lang(req), intParam(req.params.sentence, 0), null);
+    res.json({ ok: true });
+  });
+
+  // Fixing reported sentences: separate jobs from translating new sentences or
+  // generating missing audio.
+  const sentenceIds = (value: unknown): number[] | undefined =>
+    Array.isArray(value) ? value.filter((v): v is number => Number.isInteger(v)).slice(0, 5000) : undefined;
+
+  api.post('/languages/:lang/sentences/retranslate', (req, res) => {
+    const id = lang(req);
+    const ids = sentenceIds(req.body?.ids);
+    const provider = str(req.body?.provider) as TranslationProvider;
+    const chosen = TRANSLATION_PROVIDERS.includes(provider) ? provider : undefined;
+    const title = ids?.length === 1 ? 'Translating a sentence again' : 'Translating reported sentences again';
+    res.json(startJob(id, 'fix-translations', title, (ctx) => retranslateSentences(id, { ids, provider: chosen }, ctx)));
+  });
+
+  api.post('/languages/:lang/sentences/regenerate-audio', (req, res) => {
+    const id = lang(req);
+    const ids = sentenceIds(req.body?.ids);
+    const provider = str(req.body?.provider) as TtsProvider;
+    const chosen = TTS_PROVIDERS.includes(provider) ? provider : undefined;
+    const title = ids?.length === 1 ? 'Regenerating the audio of a sentence' : 'Regenerating the audio of reported sentences';
+    res.json(
+      startJob(id, 'fix-audio', title, (ctx) =>
+        regenerateSentenceAudio(id, { ids, provider: chosen, voice: str(req.body?.voice) || undefined }, ctx)
+      )
+    );
+  });
+
   // -------------------------------------------------------------------------
   // Automation jobs
 
@@ -586,7 +636,8 @@ export function apiRouter(): Router {
       return;
     }
     res.setHeader('Content-Type', audio.mime);
-    res.setHeader('Cache-Control', 'private, max-age=86400');
+    // Revalidated every time (an unchanged recording is a 304): regenerated audio is heard at once.
+    res.setHeader('Cache-Control', 'private, no-cache');
     res.send(audio.data);
   });
 

@@ -216,6 +216,8 @@ export interface AlignedToken {
   actual: string | null;
   expectedIndex: number | null;
   status: TokenStatus;
+  // How well a matched word matched (1 = exactly).
+  weight?: number;
 }
 
 export interface Alignment {
@@ -299,7 +301,7 @@ export function alignTokens(expected: string[], actual: string[], options: Align
     flushGap(pe, pa);
     const w = weights[pe + 1][pa + 1];
     const status: TokenStatus = w === 1 ? 'exact' : 'close';
-    tokens.push({ expected: expected[pe], actual: actual[pa], expectedIndex: pe, status });
+    tokens.push({ expected: expected[pe], actual: actual[pa], expectedIndex: pe, status, weight: w });
     expectedStatus[pe] = status;
     total += w;
     ei = pe + 1;

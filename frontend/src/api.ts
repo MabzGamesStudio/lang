@@ -13,8 +13,11 @@ import type {
   Paged,
   ProgressSummary,
   ResultsResponse,
+  SentenceExclusion,
   SentenceRow,
   SourceRow,
+  TranslationProvider,
+  TtsProvider,
   WordResult,
   WordRow,
 } from '../../shared/types';
@@ -107,6 +110,13 @@ export const api = {
   updateSentence: (id: string, sentenceId: number, english: string | null) =>
     put<{ ok: true }>(`${L(id)}/sentences/${sentenceId}`, { english }),
   deleteSentence: (id: string, sentenceId: number) => del<{ ok: true }>(`${L(id)}/sentences/${sentenceId}`),
+  excludeSentence: (id: string, sentenceId: number, reason: SentenceExclusion, undoId?: string) =>
+    post<{ ok: true; undone: boolean }>(`${L(id)}/sentences/${sentenceId}/exclude`, { reason, undoId }),
+  restoreSentence: (id: string, sentenceId: number) => post<{ ok: true }>(`${L(id)}/sentences/${sentenceId}/restore`),
+  retranslateSentences: (id: string, body: { ids?: number[]; provider?: TranslationProvider }) =>
+    post<JobInfo>(`${L(id)}/sentences/retranslate`, body),
+  regenerateSentenceAudio: (id: string, body: { ids?: number[]; provider?: TtsProvider; voice?: string }) =>
+    post<JobInfo>(`${L(id)}/sentences/regenerate-audio`, body),
 
   // Settings, services and jobs
   settings: () => get<AppSettings>('/settings'),

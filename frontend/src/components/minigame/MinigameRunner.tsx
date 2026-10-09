@@ -9,9 +9,10 @@ import PromptView, { voiceFor } from './PromptView';
 import { ChoiceAnswer, SpokenAnswer, TypedAnswer } from './Answers';
 import Feedback from './Feedback';
 import BatchPreview from './BatchPreview';
+import ReportMenu, { EXCLUSION_LABELS } from './ReportMenu';
 import WordEditor, { type EditableWord } from '../WordEditor';
 import { GAMES_BY_ID, PHASE_LABELS, type GameId } from '../../../../shared/games';
-import type { AppSettings, LanguageSummary, NextResponse, Notice, Question, ResultsResponse } from '../../../../shared/types';
+import type { AppSettings, LanguageSummary, NextResponse, Notice, Question, ResultsResponse, SentenceExclusion } from '../../../../shared/types';
 
 type Stage = 'loading' | 'preview' | 'answering' | 'checking' | 'feedback' | 'notice' | 'error';
 
@@ -60,6 +61,8 @@ export default function MinigameRunner({
   const lastGame = useRef<GameId | null>(null);
   const previewed = useRef(new Set<string>());
   const advanceTimer = useRef<number | undefined>(undefined);
+  // Results of the current question, so they can be taken back when it is reported.
+  const resultsRef = useRef<Promise<ResultsResponse | null> | null>(null);
   const fetchRef = useRef(fetchNext);
   fetchRef.current = fetchNext;
   const callbacks = useRef({ onUpdate, onResults });
@@ -68,6 +71,7 @@ export default function MinigameRunner({
   const load = useCallback(async () => {
     window.clearTimeout(advanceTimer.current);
     stopAudio();
+    resultsRef.current = null;
     setStage('loading');
     setOutcome(null);
     setRevealed(false);
@@ -141,10 +145,9 @@ export default function MinigameRunner({
       recent.current = [question.targetWordId, ...recent.current.filter((id) => id !== question.targetWordId)].slice(0, 6);
       lastGame.current = question.gameId;
       if (final.results.length) {
-        api
-          .results(language.id, final.results)
-          .then((res) => callbacks.current.onResults?.(res))
-          .catch((err) => notify(`Result not saved: ${errorMessage(err)}`, 'error'));
+        const pending = api.results(language.id, final.results);
+        resultsRef.current = pending.catch(() => null);
+        pending.then((res) => callbacks.current.onResults?.(res)).catch((err) => notify(`Result not saved: ${errorMessage(err)}`, 'error'));
       }
       if (!final.correct && settings.learning.playAudioOnFeedback && question.answerSide === 'foreign') {
         const voice = voiceFor('foreign', language, settings);
@@ -158,6 +161,28 @@ export default function MinigameRunner({
       }
     },
     [question, language, settings, notify, load, paused]
+  );
+
+  // Takes the sentence out of the questions; an answer already given does not count.
+  const report = useCallback(
+    async (reason: SentenceExclusion) => {
+      if (!question?.sentence) return;
+      window.clearTimeout(advanceTimer.current);
+      const undoId = (await resultsRef.current)?.undoId;
+      try {
+        const result = await api.excludeSentence(language.id, question.sentence.id, reason, undoId);
+        notify(
+          `Sentence excluded (${EXCLUSION_LABELS[reason].toLowerCase()}).${result.undone ? ' Your answer to it does not count.' : ''} Fix it in Configuration → Sentences.`,
+          'success'
+        );
+      } catch (err) {
+        notify(`Not excluded: ${errorMessage(err)}`, 'error');
+        return;
+      }
+      lastGame.current = question.gameId;
+      void load();
+    },
+    [question, language.id, notify, load]
   );
 
   const skip = useCallback(() => {
@@ -245,6 +270,7 @@ export default function MinigameRunner({
         <span className={`phase-tag phase-${question.phase}`}>{PHASE_LABELS[question.phase]}</span>
         <span>{game.title}</span>
         {stage === 'loading' && <Loader2 size={16} className="spin" />}
+        {question.sentence && <ReportMenu onReport={(reason) => void report(reason)} disabled={stage !== 'answering' && stage !== 'feedback'} />}
       </div>
       <PromptView
         question={question}

@@ -78,14 +78,18 @@ export function recomputeRanks(db: DB): void {
 }
 
 // How many (translated) sentences contain each word. Recite and translate
-// minigames are only offered for words that have sentences.
+// minigames are only offered for words that have sentences. Sentences taken
+// out of the questions do not count.
 export function refreshSentenceCounts(db: DB, wordIds?: number[]): void {
   const sql = `
     UPDATE words SET
-      sentence_count = (SELECT COUNT(DISTINCT sentence_id) FROM sentence_words WHERE word_id = words.id),
+      sentence_count = (
+        SELECT COUNT(DISTINCT sw.sentence_id) FROM sentence_words sw JOIN sentences s ON s.id = sw.sentence_id
+        WHERE sw.word_id = words.id AND s.excluded_reason IS NULL
+      ),
       translated_sentence_count = (
         SELECT COUNT(DISTINCT sw.sentence_id) FROM sentence_words sw JOIN sentences s ON s.id = sw.sentence_id
-        WHERE sw.word_id = words.id AND s.english IS NOT NULL
+        WHERE sw.word_id = words.id AND s.english IS NOT NULL AND s.excluded_reason IS NULL
       )`;
   if (wordIds) {
     if (wordIds.length === 0) return;

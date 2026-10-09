@@ -1,4 +1,4 @@
-import { HttpError, languageDb, type DB } from '../db/connection.js';
+import { HttpError, englishDatabase, languageDb, type DB } from '../db/connection.js';
 import { refreshSentenceCounts, wordIdsOfSentences } from './ranking.js';
 import { registerEnglishWords } from './english.js';
 import { setWordExclusion } from './corpus.js';
@@ -8,8 +8,8 @@ import { getLanguageConfig } from './languages.js';
 import { parseEnglish } from './util.js';
 
 export { parseEnglish };
-import { dedupe } from '../../../shared/text.js';
-import type { Paged, SentenceRow, WordLevels, WordRow } from '../../../shared/types.js';
+import { dedupe, stripParentheticals } from '../../../shared/text.js';
+import type { Paged, SentenceExclusion, SentenceRow, WordLevels, WordRow } from '../../../shared/types.js';
 
 export interface WordDbRow {
   id: number;
@@ -241,6 +241,22 @@ export function resetWordProgress(langId: string, id: number): WordRow {
 // ---------------------------------------------------------------------------
 // Sentences
 
+export const SENTENCE_EXCLUSIONS: SentenceExclusion[] = ['translation', 'nonsense', 'audio', 'other'];
+
+// Audio is stored under the text that is spoken (notes in parentheses removed).
+export function audioText(text: string): string {
+  return stripParentheticals(text).slice(0, 500);
+}
+
+// The newest stored audio of a text: where it came from and when.
+function storedAudio(db: DB, text: string): { voice: string; createdAt: number } | null {
+  return (
+    (db
+      .prepare(`SELECT voice, created_at AS createdAt FROM audio WHERE text = ? ORDER BY created_at DESC LIMIT 1`)
+      .get(audioText(text)) as { voice: string; createdAt: number } | undefined) ?? null
+  );
+}
+
 export function listSentences(
   langId: string,
   query: { offset: number; limit: number; q: string; filter: string; wordId?: number }
@@ -248,8 +264,13 @@ export function listSentences(
   const db = languageDb(langId);
   const where: string[] = [];
   const params: unknown[] = [];
-  if (query.filter === 'untranslated') where.push('english IS NULL');
-  if (query.filter === 'translated') where.push('english IS NOT NULL');
+  if (query.filter === 'untranslated') where.push('english IS NULL AND excluded_reason IS NULL');
+  if (query.filter === 'translated') where.push('english IS NOT NULL AND excluded_reason IS NULL');
+  if (query.filter === 'excluded') where.push('excluded_reason IS NOT NULL');
+  if ((SENTENCE_EXCLUSIONS as string[]).includes(query.filter)) {
+    where.push('excluded_reason = ?');
+    params.push(query.filter);
+  }
   if (query.q.trim()) {
     where.push('(text LIKE ? OR english LIKE ?)');
     params.push(`%${query.q.trim()}%`, `%${query.q.trim()}%`);
@@ -260,14 +281,37 @@ export function listSentences(
   }
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const total = (db.prepare(`SELECT COUNT(*) AS n FROM sentences ${clause}`).get(...params) as { n: number }).n;
+  const order = query.filter === 'excluded' ? 'excluded_at DESC' : 'max_rank IS NULL, max_rank, word_count';
   const rows = db
     .prepare(
       `SELECT id, text, english, translation_source AS translationSource, source_id AS sourceId,
-              word_count AS wordCount, max_rank AS maxRank
-       FROM sentences ${clause} ORDER BY max_rank IS NULL, max_rank, word_count LIMIT ? OFFSET ?`
+              word_count AS wordCount, max_rank AS maxRank, excluded_reason AS excludedReason, excluded_at AS excludedAt
+       FROM sentences ${clause} ORDER BY ${order} LIMIT ? OFFSET ?`
     )
-    .all(...params, query.limit, query.offset) as SentenceRow[];
-  return { rows, total };
+    .all(...params, query.limit, query.offset) as Omit<SentenceRow, 'audioVoice' | 'audioAt' | 'englishAudioVoice'>[];
+  const english = englishDatabase();
+  return {
+    rows: rows.map((row) => {
+      const audio = storedAudio(db, row.text);
+      return {
+        ...row,
+        audioVoice: audio?.voice ?? null,
+        audioAt: audio?.createdAt ?? null,
+        englishAudioVoice: row.english ? storedAudio(english, row.english)?.voice ?? null : null,
+      };
+    }),
+    total,
+  };
+}
+
+// Takes a sentence out of the questions (with the reason), or puts it back.
+export function setSentenceExclusion(langId: string, id: number, reason: SentenceExclusion | null): void {
+  const db = languageDb(langId);
+  const result = db
+    .prepare(`UPDATE sentences SET excluded_reason = ?, excluded_at = ? WHERE id = ?`)
+    .run(reason, reason ? Date.now() : null, id);
+  if (!result.changes) throw new HttpError(404, 'Sentence not found');
+  refreshSentenceCounts(db, wordIdsOfSentences(db, [id]));
 }
 
 export function saveSentenceTranslations(db: DB, translations: { id: number; english: string }[], source: string): number {

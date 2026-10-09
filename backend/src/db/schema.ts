@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 
-export const LANGUAGE_SCHEMA_VERSION = 1;
+export const LANGUAGE_SCHEMA_VERSION = 2;
 export const ENGLISH_SCHEMA_VERSION = 1;
 
 const LANGUAGE_SCHEMA = `
@@ -81,9 +81,12 @@ CREATE TABLE IF NOT EXISTS sentences (
   source_id INTEGER REFERENCES sources(id) ON DELETE CASCADE,
   word_count INTEGER NOT NULL,
   max_rank INTEGER,
-  last_used_at INTEGER
+  last_used_at INTEGER,
+  excluded_reason TEXT,
+  excluded_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS sentences_max_rank ON sentences(max_rank);
+CREATE INDEX IF NOT EXISTS sentences_excluded ON sentences(excluded_reason) WHERE excluded_reason IS NOT NULL;
 CREATE INDEX IF NOT EXISTS sentences_source ON sentences(source_id);
 
 CREATE TABLE IF NOT EXISTS sentence_words (
@@ -167,18 +170,32 @@ function schemaVersion(db: Database.Database): number {
   return row ? Number(row.value) : 0;
 }
 
-function migrate(db: Database.Database, schema: string, kind: string, version: number): void {
+// Changes to tables of existing databases, by the schema version they lead to.
+// New databases get the columns from the CREATE TABLE statements directly.
+// 2: sentences.excluded_reason ('translation', 'nonsense', 'audio' or 'other')
+//    takes a sentence out of the questions; excluded_at says when.
+const LANGUAGE_UPGRADES: Record<number, string> = {
+  2: `ALTER TABLE sentences ADD COLUMN excluded_reason TEXT;
+      ALTER TABLE sentences ADD COLUMN excluded_at INTEGER;`,
+};
+
+function migrate(db: Database.Database, schema: string, kind: string, version: number, upgrades: Record<number, string> = {}): void {
   const current = schemaVersion(db);
   if (current > version) {
     throw new Error(`This ${kind} database was created by a newer version of the app (schema ${current}).`);
   }
-  db.exec(schema);
-  db.prepare(`INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', ?)`).run(String(version));
-  db.prepare(`INSERT OR REPLACE INTO meta (key, value) VALUES ('kind', ?)`).run(kind);
+  db.transaction(() => {
+    if (current > 0) {
+      for (let step = current + 1; step <= version; step++) if (upgrades[step]) db.exec(upgrades[step]);
+    }
+    db.exec(schema);
+    db.prepare(`INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', ?)`).run(String(version));
+    db.prepare(`INSERT OR REPLACE INTO meta (key, value) VALUES ('kind', ?)`).run(kind);
+  })();
 }
 
 export function migrateLanguageDb(db: Database.Database): void {
-  migrate(db, LANGUAGE_SCHEMA, 'language', LANGUAGE_SCHEMA_VERSION);
+  migrate(db, LANGUAGE_SCHEMA, 'language', LANGUAGE_SCHEMA_VERSION, LANGUAGE_UPGRADES);
 }
 
 export function migrateEnglishDb(db: Database.Database): void {

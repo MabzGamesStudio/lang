@@ -134,3 +134,62 @@
 .undefined-count strong {
   color: $warning;
 }
+
+// Configuration → Sentences: reported sentences and where things came from.
+.reported-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: $space-md;
+  margin-bottom: $space-md;
+}
+
+.reported-card {
+  padding: $space-md;
+  border-radius: $radius-md;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+
+  h3 {
+    margin: 0 0 $space-xs;
+    font-size: 1rem;
+  }
+
+  p {
+    margin: 0 0 $space-sm;
+    font-size: 0.85rem;
+  }
+
+  .row {
+    align-items: flex-end;
+  }
+}
+
+.table.sentences {
+  .sentence-text {
+    display: flex;
+    align-items: flex-start;
+    gap: $space-xs;
+  }
+
+  .origin {
+    font-size: 0.78rem;
+    margin-top: 2px;
+  }
+
+  tr.excluded .sentence-text {
+    opacity: 0.6;
+  }
+
+  select.status-excluded {
+    border-color: rgba(245, 158, 11, 0.6);
+    color: #fbbf24;
+  }
+}
+
+.table.voice-options {
+  font-size: 0.85rem;
+
+  td {
+    vertical-align: top;
+  }
+}

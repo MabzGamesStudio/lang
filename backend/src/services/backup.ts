@@ -12,7 +12,7 @@ import {
   languageDbPath,
   openFile,
 } from '../db/connection.js';
-import { readMeta, writeMeta } from '../db/schema.js';
+import { ENGLISH_SCHEMA_VERSION, LANGUAGE_SCHEMA_VERSION, readMeta, writeMeta } from '../db/schema.js';
 import { DATA_DIR, ENGLISH_DB_PATH, LANGUAGES_DIR, ensureDataDirs } from '../config.js';
 import { getLanguageConfig, languageSummary } from './languages.js';
 import { invalidateImageIndex } from './english.js';
@@ -81,6 +81,10 @@ function stageDatabase(bytes: Buffer, directory: string, kind: 'language' | 'eng
       const actualKind = readMeta(db, 'kind');
       if (actualKind !== kind) throw new HttpError(400, `The backup database is not a ${kind} database`);
       if (kind === 'language' && !readMeta(db, 'config')) throw new HttpError(400, 'The language backup has no configuration');
+      const version = Number(readMeta(db, 'schema_version') ?? 0);
+      if (version > (kind === 'language' ? LANGUAGE_SCHEMA_VERSION : ENGLISH_SCHEMA_VERSION)) {
+        throw new HttpError(400, 'The backup was made by a newer version of the app. Update the app to import it.');
+      }
       const check = db.pragma('integrity_check', { simple: true });
       if (check !== 'ok') throw new HttpError(400, `The backup database is damaged (${String(check)})`);
     } finally {

@@ -57,6 +57,20 @@ function introduced(word: { rank: number | null; active: number | boolean }, fro
   return Boolean(word.active) && word.rank !== null && word.rank <= frontier;
 }
 
+// Met in a question before (or already learnt). Other words are never scored,
+// so a word is never marked down before it has been taught.
+function met(word: { last_seen_at: number | null; srs_stage: number }): boolean {
+  return word.last_seen_at !== null || word.srs_stage > 0;
+}
+
+function metIds(db: DB, ids: number[]): Set<number> {
+  if (ids.length === 0) return new Set();
+  const rows = db
+    .prepare(`SELECT id FROM words WHERE id IN (SELECT value FROM json_each(?)) AND (last_seen_at IS NOT NULL OR srs_stage > 0)`)
+    .all(JSON.stringify(ids)) as { id: number }[];
+  return new Set(rows.map((row) => row.id));
+}
+
 function intersects(a: Set<string>, b: Iterable<string>): boolean {
   for (const value of b) if (a.has(value)) return true;
   return false;
@@ -130,7 +144,7 @@ function buildChoice(game: GameDef, target: Learner, ctx: BuildContext, prompt: 
     const correct =
       w.id === target.id ||
       (englishOptions ? target.keys.has(glossKey(text)) : w.word === target.word || intersects(prompt.keys, w.keys));
-    return { text, wordId: w.id, correct, evaluate: introduced(w, ctx.frontier) };
+    return { text, wordId: w.id, correct, evaluate: introduced(w, ctx.frontier) && (w.id === target.id || met(w)) };
   });
 
   return {
@@ -157,9 +171,10 @@ function buildTypedWord(game: GameDef, target: Learner, ctx: BuildContext, promp
     accepted = [{ text: target.display, wordId: target.id, evaluate: true }];
     // Synonyms: any word meaning what the prompt shows is a right answer.
     if (prompt.keys.size > 0) {
-      for (const synonym of wordsWithGlosses(ctx.langId, prompt.keys)) {
-        if (synonym.id === target.id) continue;
-        accepted.push({ text: synonym.display, wordId: synonym.id, evaluate: introduced(synonym, ctx.frontier) });
+      const synonyms = wordsWithGlosses(ctx.langId, prompt.keys).filter((synonym) => synonym.id !== target.id);
+      const seen = metIds(ctx.db, synonyms.map((synonym) => synonym.id));
+      for (const synonym of synonyms) {
+        accepted.push({ text: synonym.display, wordId: synonym.id, evaluate: introduced(synonym, ctx.frontier) && seen.has(synonym.id) });
       }
     }
   }
@@ -193,7 +208,8 @@ export function pickSentence(db: DB, wordId: number, needEnglish: boolean, front
     .prepare(
       `SELECT s.id, s.text, s.english, s.word_count AS wordCount, s.last_used_at AS lastUsedAt
        FROM sentences s
-       WHERE s.id IN (SELECT sentence_id FROM sentence_words WHERE word_id = ?) ${needEnglish ? 'AND s.english IS NOT NULL' : ''}
+       WHERE s.id IN (SELECT sentence_id FROM sentence_words WHERE word_id = ?) AND s.excluded_reason IS NULL
+         ${needEnglish ? 'AND s.english IS NOT NULL' : ''}
        ORDER BY (s.max_rank <= ?) DESC, COALESCE(s.last_used_at, 0), s.max_rank
        LIMIT 40`
     )
@@ -228,20 +244,28 @@ export function pickSentence(db: DB, wordId: number, needEnglish: boolean, front
 function sentenceTokens(ctx: BuildContext, sentence: SentenceCandidate, targetId: number): SentenceToken[] {
   const rows = ctx.db
     .prepare(
-      `SELECT sw.word_id AS wordId, w.word, w.rank, w.active FROM sentence_words sw JOIN words w ON w.id = sw.word_id
+      `SELECT sw.word_id AS wordId, w.word, w.rank, w.active, w.last_seen_at, w.srs_stage
+       FROM sentence_words sw JOIN words w ON w.id = sw.word_id
        WHERE sw.sentence_id = ? ORDER BY sw.position`
     )
-    .all(sentence.id) as { wordId: number; word: string; rank: number | null; active: number }[];
+    .all(sentence.id) as { wordId: number; word: string; rank: number | null; active: number; last_seen_at: number | null; srs_stage: number }[];
   const tokens = tokenize(sentence.text, ctx.config.locale);
   const byWord = new Map(rows.map((row) => [row.word, row]));
   return tokens.map((token, index) => {
     const row = rows.length === tokens.length && rows[index].word === token.word ? rows[index] : byWord.get(token.word);
-    return {
-      text: token.surface,
-      wordId: row?.wordId ?? null,
-      evaluate: row ? introduced(row, ctx.frontier) : false,
-      target: row?.wordId === targetId,
-    };
+    if (!row) return { text: token.surface, wordId: null, evaluate: false, target: false };
+    const target = row.wordId === targetId;
+    // Scored: the word asked about, and words already met. Names and other
+    // excluded words, words not met yet and words further on are only shown.
+    const evaluate = introduced(row, ctx.frontier) && (target || met(row));
+    const skip = evaluate
+      ? undefined
+      : !row.active
+        ? ('excluded' as const)
+        : row.rank === null || row.rank > ctx.frontier
+          ? ('later' as const)
+          : ('unseen' as const);
+    return { text: token.surface, wordId: row.wordId, evaluate, target, ...(skip ? { skip } : {}) };
   });
 }
 

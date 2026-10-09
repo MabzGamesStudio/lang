@@ -3,6 +3,7 @@ import { BookOpen, Download, FileText, Link2, ListOrdered, RefreshCw, Search, Tr
 import { api } from '../../api';
 import { useAction, useApp } from '../../state/AppContext';
 import JobsPanel from '../../components/JobsPanel';
+import VoiceServices from './VoiceServices';
 import { Field, NumberInput, Section, TextInput } from './fields';
 import type { GutenbergBook, LanguageSummary, SourceRow, SourceWeighting } from '../../../../shared/types';
 
@@ -294,6 +295,13 @@ export default function SourcesTab({ language }: { language: LanguageSummary }) 
         >
           <RefreshCw size={14} /> Rebuild statistics
         </button>
+      </Section>
+
+      <Section
+        title="Audio for words and sentences"
+        description="Text to speech: where the voices come from. Generated audio is stored with the language and reused."
+      >
+        <VoiceServices />
       </Section>
     </>
   );

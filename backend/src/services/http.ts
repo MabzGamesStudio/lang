@@ -99,7 +99,11 @@ export async function postJson<T>(url: string, body: unknown, headers: Record<st
   return (await response.json()) as T;
 }
 
-export async function postForBytes(url: string, body: unknown, headers: Record<string, string> = {}): Promise<{ data: Buffer; contentType: string }> {
+export async function postForBytes(
+  url: string,
+  body: unknown,
+  headers: Record<string, string> = {}
+): Promise<{ data: Buffer; contentType: string; headers: Headers }> {
   const response = await httpFetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...headers },
@@ -110,5 +114,6 @@ export async function postForBytes(url: string, body: unknown, headers: Record<s
   return {
     data: Buffer.from(await response.arrayBuffer()),
     contentType: response.headers.get('content-type') ?? 'audio/mpeg',
+    headers: response.headers,
   };
 }

@@ -20,6 +20,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
     provider: 'browser',
     openai: { baseUrl: 'https://api.openai.com/v1', apiKey: '', model: 'tts-1', voice: 'alloy' },
     google: { apiKey: '' },
+    azure: { apiKey: '', region: 'westeurope' },
+    elevenlabs: { apiKey: '', model: 'eleven_multilingual_v2', voice: 'JBFqnCBsd6RMkjVDRZzb', baseUrl: 'https://api.elevenlabs.io' },
     englishVoice: '',
     rate: 1,
   },
@@ -63,6 +65,8 @@ export const SECRET_PATHS: string[][] = [
   ['translation', 'libretranslate', 'apiKey'],
   ['tts', 'openai', 'apiKey'],
   ['tts', 'google', 'apiKey'],
+  ['tts', 'azure', 'apiKey'],
+  ['tts', 'elevenlabs', 'apiKey'],
   ['stt', 'openai', 'apiKey'],
   ['huggingface', 'token'],
 ];

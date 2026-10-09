@@ -62,7 +62,9 @@ Then, in the app:
 
 Questions and answers are colour-coded by language in every minigame: whatever is in English has a blue border, whatever is in the language you learn a red one. Within a session, the same word is never asked twice in a row and wrongly answered words come back after a couple of other questions. A typed answer that is accepted but not exact (a missing accent, a small typo, a synonym, a close sentence) does not move on by itself, so you can compare it with the exact answer; this can be switched off in *Configuration → Learning*. The word preview can be shown before every batch and phase, only for new words, or never. An optional pomodoro timer (25 min / 5 min) runs during sessions.
 
-In sentence exercises, every word of the sentence that you were already introduced to is scored. Words you have not reached yet are shown but not evaluated. Speaking minigames can be switched off for Personal progress (*Configuration → Learning*, or the toggle on the progress page).
+In sentence exercises, the word the question is about and every word of the sentence you have already met are scored. Words you have not met yet, words further on in the vocabulary and names are shown but never scored, and they never make an answer wrong. After a sentence question, the words of the sentence are listed: any word (for example a name) can be made neutral there, so it is never counted again, or counted again. Speaking minigames can be switched off for Personal progress (*Configuration → Learning*, or the toggle on the progress page).
+
+**Excluding a question:** *Exclude*, next to the minigame name, takes the sentence of a question out of the questions, with a reason: bad translation, doesn't make sense, bad audio or another problem. When you exclude a question you already answered, that answer does not count. Reported sentences are fixed in *Configuration → Sentences* (see below).
 
 The **main menu** also lists every minigame for free practice on any batch (or every batch up to it). It updates the same knowledge levels and shows a ★ when a batch is mastered.
 
@@ -96,7 +98,7 @@ Words are tokenised with `Intl.Segmenter`, so languages without spaces (Japanese
 | English translations, part of speech, IPA | **Wiktionary** (free, no key) or an **LLM** |
 | Sentence translation (batched, saved to the database) | **LLM**, **DeepL**, **Google Cloud Translation**, **LibreTranslate** |
 | Extra example sentences | **LLM** (for words with too few sentences) |
-| Text to speech (cached in the database) | **On device** (browser voices), **Google Colab** (neural voices), **OpenAI-compatible** speech API, **Google Cloud TTS** |
+| Text to speech (cached in the database) | **On device** (browser voices), **Google Colab** (Microsoft neural voices, or the open-source **Kokoro** and **Chatterbox** models), **Azure Speech**, **ElevenLabs**, **Google Cloud TTS**, **OpenAI-compatible** speech API (OpenAI, or a self-hosted open-source server such as Kokoro-FastAPI or openedai-speech) |
 | Speech recognition | **Browser** (Chrome/Edge), **Google Colab** (Whisper), any **Whisper-compatible API** |
 
 Notes in parentheses — “(he/she) said”, “perro (m)” — are shown but never spoken and never required when typing.
@@ -105,9 +107,18 @@ The LLM can be an open-source model in Google Colab, any OpenAI-compatible API (
 
 **Google Colab (free):** open `ipynb/LangColabServer.ipynb` in Colab, select a GPU runtime and *Run all*. It starts Ollama (default `qwen2.5:7b`), faster-whisper and edge-tts behind one Cloudflare tunnel, and prints a URL to paste into *Configuration → Services → Colab URL*. If tunnels are blocked, use **offline batches** instead: download a job file from the app, run it in the notebook, and upload the results.
 
+Voices in the notebook: `TTS_ENGINE = "edge"` (Microsoft neural voices, free, most languages), `"kokoro"` (open source, Apache-2.0: English, Spanish, French, Hindi, Italian, Japanese, Brazilian Portuguese, Mandarin) or `"chatterbox"` (open source, MIT, 23 languages, needs the GPU). Languages an open-source engine does not cover use the Microsoft voices. *Configuration → Sources* compares all the voice options.
+
 Offline batches are saved to Google Drive (`MyDrive/lang-colab`) after every batch of 40 words or 20 sentences, and a part file is downloaded every 1,000 results (`SAVE_TO_DRIVE` and `DOWNLOAD_EVERY` in the first cell). If Colab disconnects, *Run all* again: unfinished jobs continue where they stopped, without uploading the job file again. In the app, *Upload results* accepts all the part files at once.
 
 While you learn, the app prepares the current block in the background (definitions, sentence translations, example sentences, audio) with whatever services are configured. Words still missing a translation can be typed in directly from the session.
+
+### Sentences
+Every sentence shows where its audio (service and voice) and its translation came from. Sentences can be excluded or put back with a reason, filtered by reason, translated again, given new audio or deleted. **Reported sentences** has two jobs that only redo excluded sentences, separate from translating new sentences and generating missing audio:
+- **Translate them again** (bad translation), with any configured translation service. A language model is told which translation was reported as wrong. Sentences whose translation comes back the same stay excluded.
+- **Regenerate their audio** (bad audio), with any voice service and an optional voice. The old recording (and the English one, if any) is replaced. The same service and voice usually give the same audio, so choose another one.
+
+Fixed sentences go back into the questions.
 
 ### Images
 Images are labelled with **English words** and shared by every language. One picture can mean several words, and the image minigames accept all of them.
