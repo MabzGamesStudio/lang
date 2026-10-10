@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Ban, Check, Pencil, RotateCcw } from 'lucide-react';
+import { Ban, Check, Mic, Pencil, RotateCcw } from 'lucide-react';
 import { api } from '../../api';
 import { useAction, useApp } from '../../state/AppContext';
 import { useDebounced, formatRelative } from '../../lib/hooks';
 import LevelDots from '../../components/LevelDots';
+import Recordings from '../../components/Recordings';
+import { definitionSourceLabel, voiceLabel } from '../../lib/sourceLabels';
 import WordEditor, { type EditableWord } from '../../components/WordEditor';
 import { batchOfRank } from '../../../../shared/scoring';
 import type { LanguageSummary, Paged, WordRow } from '../../../../shared/types';
@@ -35,6 +37,14 @@ export default function WordsTab({ language }: { language: LanguageSummary }) {
   const [offset, setOffset] = useState(0);
   const [data, setData] = useState<Paged<WordRow>>({ rows: [], total: 0 });
   const [editing, setEditing] = useState<EditableWord | null>(null);
+  const [open, setOpen] = useState<Set<number>>(new Set());
+  const toggle = (id: number) =>
+    setOpen((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   const q = useDebounced(query, 250);
 
   const load = () =>
@@ -92,8 +102,33 @@ export default function WordsTab({ language }: { language: LanguageSummary }) {
               <td lang={language.code}>
                 <strong>{word.display}</strong>
                 {word.properNoun && <span className="tag">name</span>}
+                {word.origins && word.origins.length > 0 && (
+                  <div className="origin muted" title="Books and word lists the word was found in (and how often)">
+                    From: {word.origins.map((origin) => `${origin.title} (${origin.count})`).join(', ')}
+                  </div>
+                )}
+                {open.has(word.id) && (
+                  <div className="sentence-details">
+                    <span className="muted">Recordings</span>
+                    <Recordings target={language.id} text={word.display} initial={word.audio} />
+                  </div>
+                )}
               </td>
-              <td>{word.english.join('; ') || <span className="muted">—</span>}</td>
+              <td>
+                {word.english.length === 0 ? (
+                  <span className="muted">—</span>
+                ) : (
+                  word.english.map((gloss, index) => (
+                    <span key={gloss} className="gloss-chip" title={`Source: ${definitionSourceLabel(word.englishSources[index] ?? null)}`}>
+                      {gloss}
+                      <small>{definitionSourceLabel(word.englishSources[index] ?? null)}</small>
+                    </span>
+                  ))
+                )}
+                {word.audio && word.audio.length > 0 && (
+                  <div className="origin muted">Audio: {word.audio.map((recording) => voiceLabel(recording.voice)).join(', ')}</div>
+                )}
+              </td>
               <td className="ipa">{word.pronunciation ?? ''}</td>
               <td>{word.count.toLocaleString()}</td>
               <td title={`${word.translatedSentenceCount} of them translated`}>{word.sentenceCount}</td>
@@ -102,6 +137,9 @@ export default function WordsTab({ language }: { language: LanguageSummary }) {
               </td>
               <td className="muted">{word.srsStage > 0 ? (word.reviewing ? 'reviewing' : formatRelative(word.nextReviewAt)) : ''}</td>
               <td className="actions">
+                <button className={`icon-button ${open.has(word.id) ? 'active' : ''}`} title="Recordings and their sources" onClick={() => toggle(word.id)}>
+                  <Mic size={14} />
+                </button>
                 <button className="icon-button" title="Edit" onClick={() => setEditing({ ...word })}>
                   <Pencil size={14} />
                 </button>

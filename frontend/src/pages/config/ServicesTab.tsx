@@ -4,6 +4,7 @@ import { api } from '../../api';
 import { useAction, useApp } from '../../state/AppContext';
 import { browserRecognitionAvailable } from '../../lib/speech';
 import JobsPanel from '../../components/JobsPanel';
+import { VOICE_SERVICE_OPTIONS } from './VoiceServices';
 import { Field, NumberInput, Section, TextInput, Toggle, useSettingsDraft } from './fields';
 import type { AppSettings, JobInfo, LanguageSummary } from '../../../../shared/types';
 
@@ -309,10 +310,11 @@ export default function ServicesTab() {
         <div className="form-grid">
           <Field label="Voice service">
             <select value={draft.tts.provider} onChange={(event) => update((s) => void (s.tts.provider = event.target.value as AppSettings['tts']['provider']))}>
-              <option value="browser">On this device (browser voices)</option>
-              <option value="colab">Google Colab (Microsoft neural voices)</option>
-              <option value="openai">OpenAI-compatible speech API</option>
-              <option value="google">Google Cloud Text-to-Speech</option>
+              {VOICE_SERVICE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
             </select>
           </Field>
           {draft.tts.provider === 'openai' && (
@@ -336,6 +338,29 @@ export default function ServicesTab() {
               <TextInput type="password" value={draft.tts.google.apiKey} onChange={(value) => update((s) => void (s.tts.google.apiKey = value))} />
             </Field>
           )}
+          {draft.tts.provider === 'azure' && (
+            <>
+              <Field label="Azure Speech key" hint="Azure portal → Speech service → Keys and Endpoint (free tier available)">
+                <TextInput type="password" value={draft.tts.azure.apiKey} onChange={(value) => update((s) => void (s.tts.azure.apiKey = value))} />
+              </Field>
+              <Field label="Region" hint="e.g. westeurope, eastus">
+                <TextInput value={draft.tts.azure.region} onChange={(value) => update((s) => void (s.tts.azure.region = value.trim()))} />
+              </Field>
+            </>
+          )}
+          {draft.tts.provider === 'elevenlabs' && (
+            <>
+              <Field label="ElevenLabs API key">
+                <TextInput type="password" value={draft.tts.elevenlabs.apiKey} onChange={(value) => update((s) => void (s.tts.elevenlabs.apiKey = value))} />
+              </Field>
+              <Field label="Model" hint="eleven_multilingual_v2, eleven_flash_v2_5 (cheaper) or eleven_v3">
+                <TextInput value={draft.tts.elevenlabs.model} onChange={(value) => update((s) => void (s.tts.elevenlabs.model = value.trim()))} />
+              </Field>
+              <Field label="Default voice ID" hint="From the ElevenLabs voice library; any voice speaks every language">
+                <TextInput value={draft.tts.elevenlabs.voice} onChange={(value) => update((s) => void (s.tts.elevenlabs.voice = value.trim()))} />
+              </Field>
+            </>
+          )}
           <Field label="English voice" hint="Browser voice name or service voice (empty = automatic)">
             <TextInput value={draft.tts.englishVoice} onChange={(value) => update((s) => void (s.tts.englishVoice = value))} />
           </Field>
@@ -343,7 +368,10 @@ export default function ServicesTab() {
             <NumberInput value={draft.tts.rate} min={0.5} max={1.5} step={0.05} onChange={(value) => update((s) => void (s.tts.rate = value))} />
           </Field>
         </div>
-        <p className="muted">Each language's voice is set in the Language tab.</p>
+        <p className="muted">
+          Each language's voice is set in the Language tab. With Google Colab, the notebook setting <code>TTS_ENGINE</code> picks Microsoft voices
+          or the open-source Kokoro or Chatterbox models. A comparison of all options is in Configuration → Sources.
+        </p>
         {language && draft.tts.provider !== 'browser' && (
           <div className="row">
             <TestButton service="tts" langId={language.id} />

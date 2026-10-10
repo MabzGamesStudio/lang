@@ -95,9 +95,12 @@ export function languageSummary(id: string): LanguageSummary {
     .get(now) as { wordCount: number; definedWordCount: number; learnedCount: number; dueCount: number };
   const sentences = db
     .prepare(
-      `SELECT COUNT(*) AS sentenceCount, COUNT(english) AS translatedSentenceCount FROM sentences`
+      `SELECT COUNT(*) FILTER (WHERE excluded_reason IS NULL OR excluded_reason = 'audio') AS sentenceCount,
+              COUNT(english) FILTER (WHERE excluded_reason IS NULL OR excluded_reason = 'audio') AS translatedSentenceCount,
+              COUNT(*) FILTER (WHERE excluded_reason IS NOT NULL) AS excludedSentenceCount
+       FROM sentences`
     )
-    .get() as { sentenceCount: number; translatedSentenceCount: number };
+    .get() as { sentenceCount: number; translatedSentenceCount: number; excludedSentenceCount: number };
   const sources = db.prepare(`SELECT COUNT(*) AS n FROM sources`).get() as { n: number };
   return {
     ...config,

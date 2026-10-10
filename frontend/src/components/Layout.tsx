@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { BarChart3, Home, Settings, X } from 'lucide-react';
+import { AudioLines, BarChart3, Home, Settings, X } from 'lucide-react';
 import { useApp } from '../state/AppContext';
 
 export function LanguageSelect({ compact = false }: { compact?: boolean }) {
@@ -41,6 +41,9 @@ export default function Layout() {
           </NavLink>
           <NavLink to="/progress">
             <BarChart3 size={16} /> Personal progress
+          </NavLink>
+          <NavLink to="/pronunciation">
+            <AudioLines size={16} /> Pronunciation
           </NavLink>
           <NavLink to="/config">
             <Settings size={16} /> Configuration

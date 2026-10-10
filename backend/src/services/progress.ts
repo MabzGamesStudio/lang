@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { languageDb, HttpError, type DB } from '../db/connection.js';
 import { getLanguageConfig } from './languages.js';
 import { getSettings } from './settings.js';
@@ -504,6 +505,62 @@ export function freePlayNext(
 // ---------------------------------------------------------------------------
 // Recording answers
 
+// ---------------------------------------------------------------------------
+// Taking results back: a question reported as bad (wrong translation, bad
+// audio...) must not count. The progress of the words an answer changed is
+// kept for a while so it can be restored.
+
+const UNDO_COLUMNS = [
+  'recognition_level',
+  'recall_level',
+  'recite_level',
+  'translate_level',
+  'recognition_correct',
+  'recognition_wrong',
+  'recall_correct',
+  'recall_wrong',
+  'recite_correct',
+  'recite_wrong',
+  'translate_correct',
+  'translate_wrong',
+  'first_seen_at',
+  'last_seen_at',
+  'srs_stage',
+  'learned_at',
+  'next_review_at',
+  'review_started_at',
+  'review_errors',
+];
+
+interface UndoEntry {
+  langId: string;
+  day: string;
+  correct: number;
+  wrong: number;
+  rows: Record<string, number | null>[];
+}
+
+const undoEntries = new Map<string, UndoEntry>();
+const MAX_UNDO_ENTRIES = 100;
+
+// Restores the words an answer changed. False when it is too old to undo.
+export function undoResults(langId: string, undoId: string): boolean {
+  const entry = undoEntries.get(undoId);
+  if (!entry || entry.langId !== langId) return false;
+  undoEntries.delete(undoId);
+  const db = languageDb(langId);
+  const restore = db.prepare(`UPDATE words SET ${UNDO_COLUMNS.map((column) => `${column} = @${column}`).join(', ')} WHERE id = @id`);
+  db.transaction(() => {
+    for (const row of entry.rows) restore.run(row);
+    db.prepare(`UPDATE activity SET correct = MAX(0, correct - ?), wrong = MAX(0, wrong - ?) WHERE day = ?`).run(
+      entry.correct,
+      entry.wrong,
+      entry.day
+    );
+  })();
+  return true;
+}
+
 export function applyResults(langId: string, results: WordResult[]): ResultsResponse {
   const db = languageDb(langId);
   const rules = progressRules(getSettings());
@@ -511,9 +568,13 @@ export function applyResults(langId: string, results: WordResult[]): ResultsResp
   const learned: number[] = [];
   const reviewed: number[] = [];
   const levels: Record<number, WordLevels> = {};
+  let correct = 0;
+  let wrong = 0;
+  let before: Record<string, number | null>[] = [];
   db.transaction(() => {
-    let correct = 0;
-    let wrong = 0;
+    before = db
+      .prepare(`SELECT id, ${UNDO_COLUMNS.join(', ')} FROM words WHERE id IN (SELECT value FROM json_each(?))`)
+      .all(JSON.stringify([...new Set(results.map((result) => result.wordId))])) as Record<string, number | null>[];
     const touched = new Set<number>();
     for (const result of results) {
       if (!PHASES.includes(result.phase)) continue;
@@ -549,7 +610,10 @@ export function applyResults(langId: string, results: WordResult[]): ResultsResp
       }
     }
   })();
-  return { learned, reviewed, levels };
+  const undoId = randomUUID();
+  undoEntries.set(undoId, { langId, day: localDay(now), correct, wrong, rows: before });
+  while (undoEntries.size > MAX_UNDO_ENTRIES) undoEntries.delete(undoEntries.keys().next().value as string);
+  return { learned, reviewed, levels, undoId };
 }
 
 // ---------------------------------------------------------------------------

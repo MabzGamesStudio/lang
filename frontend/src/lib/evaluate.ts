@@ -80,6 +80,20 @@ function wordOutcome(question: Question, response: string, locale: string, setti
   };
 }
 
+// Like the alignment score, but only over the words that are scored: names
+// and words not met yet neither help nor hurt. Extra words still count.
+function countedScore(alignment: AlignedToken[], counts: boolean[]): number {
+  let total = 0;
+  let size = 0;
+  for (const token of alignment) {
+    if (token.expectedIndex !== null && !counts[token.expectedIndex]) continue;
+    if (token.expected !== null) size++;
+    if (token.actual !== null) size++;
+    if (token.status === 'exact' || token.status === 'close') total += token.weight ?? 1;
+  }
+  return size === 0 ? 1 : (2 * total) / size;
+}
+
 function sentenceOutcome(
   question: Question,
   response: string,
@@ -91,11 +105,28 @@ function sentenceOutcome(
 ): Outcome {
   const sentence = question.sentence!;
   const foreignAnswer = question.response.side === 'foreign';
-  const expected = foreignAnswer
-    ? sentence.tokens.map((token) => normalizeForCompare(token.text, locale))
-    : normalizedTokens(stripParentheticals(question.answer), 'en');
-  const alignment = alignTokens(expected, actual, { accentLenient, closeSimilarity });
-  const correct = alignment.score >= threshold;
+  // An English answer may match any of the sentence's translations: the closest counts.
+  const references = foreignAnswer ? [question.answer] : (question.accepted ?? []).map((answer) => answer.text).filter(Boolean);
+  if (references.length === 0) references.push(question.answer);
+  let alignment = alignTokens([], actual, { accentLenient, closeSimilarity });
+  let reference = question.answer;
+  references.forEach((candidate, index) => {
+    const expected = foreignAnswer
+      ? sentence.tokens.map((token) => normalizeForCompare(token.text, locale))
+      : normalizedTokens(stripParentheticals(candidate), 'en');
+    const aligned = alignTokens(expected, actual, { accentLenient, closeSimilarity });
+    if (index === 0 || aligned.score > alignment.score) {
+      alignment = aligned;
+      reference = candidate;
+    }
+  });
+  const score = foreignAnswer
+    ? countedScore(
+        alignment.tokens,
+        sentence.tokens.map((token) => token.evaluate)
+      )
+    : alignment.score;
+  const correct = score >= threshold;
   const results: WordResult[] = [];
   if (foreignAnswer) {
     // Each known word in the sentence is scored on its own.
@@ -118,8 +149,9 @@ function sentenceOutcome(
     correct,
     quality: correct ? (alignment.score >= 0.999 ? 'exact' : 'close') : 'wrong',
     response,
-    score: alignment.score,
+    score,
     alignment: alignment.tokens,
+    ...(reference !== question.answer ? { matched: reference } : {}),
     results,
   };
 }

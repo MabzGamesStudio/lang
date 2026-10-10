@@ -1,4 +1,5 @@
 import type { GameId } from '../../shared/games';
+import type { IpaAudioRef, IpaNextRequest, IpaNextResponse, IpaRecording, IpaResult, IpaSummary } from '../../shared/ipa/games';
 import type {
   AppSettings,
   GutenbergBook,
@@ -12,9 +13,14 @@ import type {
   NextResponse,
   Paged,
   ProgressSummary,
+  Recording,
   ResultsResponse,
+  SentenceExclusion,
   SentenceRow,
   SourceRow,
+  TranslationProvider,
+  TtsProvider,
+  WordLevels,
   WordResult,
   WordRow,
 } from '../../shared/types';
@@ -107,6 +113,13 @@ export const api = {
   updateSentence: (id: string, sentenceId: number, english: string | null) =>
     put<{ ok: true }>(`${L(id)}/sentences/${sentenceId}`, { english }),
   deleteSentence: (id: string, sentenceId: number) => del<{ ok: true }>(`${L(id)}/sentences/${sentenceId}`),
+  excludeSentence: (id: string, sentenceId: number, reason: SentenceExclusion, undoId?: string) =>
+    post<{ ok: true; undone: boolean }>(`${L(id)}/sentences/${sentenceId}/exclude`, { reason, undoId }),
+  restoreSentence: (id: string, sentenceId: number) => post<{ ok: true }>(`${L(id)}/sentences/${sentenceId}/restore`),
+  retranslateSentences: (id: string, body: { ids?: number[]; provider?: TranslationProvider }) =>
+    post<JobInfo>(`${L(id)}/sentences/retranslate`, body),
+  regenerateSentenceAudio: (id: string, body: { ids?: number[]; provider?: TtsProvider; voice?: string }) =>
+    post<JobInfo>(`${L(id)}/sentences/regenerate-audio`, body),
 
   // Settings, services and jobs
   settings: () => get<AppSettings>('/settings'),
@@ -142,8 +155,24 @@ export const api = {
 
   // Audio
   audioUrl: (target: string, text: string) => `/api/audio${query({ lang: target, text })}`,
+  recordings: (target: string, text: string) => get<Recording[]>(`/recordings${query({ lang: target, text })}`),
+  recordingUrl: (target: string, id: number) => `/api/recordings/${encodeURIComponent(target)}/${id}`,
+  deleteRecording: (target: string, id: number) => del<{ deleted: boolean }>(`/recordings/${encodeURIComponent(target)}/${id}`),
+  addRecording: (target: string, text: string, options: { provider?: TtsProvider; voice?: string } = {}) =>
+    post<Recording>('/recordings', { lang: target, text, ...options }),
   transcribe: (target: string, audio: Blob) =>
     request<{ text: string }>('POST', `/stt${query({ lang: target })}`, undefined, { data: audio, type: audio.type }),
+
+  // Pronunciation mode (IPA)
+  ipaSummary: () => get<IpaSummary>('/ipa'),
+  ipaDownload: () => post<JobInfo>('/ipa/download'),
+  ipaNext: (body: IpaNextRequest) => post<IpaNextResponse>('/ipa/next', body),
+  ipaResults: (results: IpaResult[]) => post<{ levels: Record<string, WordLevels> }>('/ipa/results', { results }),
+  ipaReset: () => post<{ ok: true }>('/ipa/reset'),
+  ipaAudioUrl: (ref: Pick<IpaAudioRef, 'kind' | 'lang' | 'text'>) => `/api/ipa/audio${query({ kind: ref.kind, lang: ref.lang, text: ref.text })}`,
+  ipaRecordingUrl: (id: number) => `/api/ipa/recordings/${id}`,
+  deleteIpaRecording: (id: number) => del<{ deleted: boolean }>(`/ipa/recordings/${id}`),
+  addIpaRecording: (lang: string, text: string, provider?: TtsProvider) => post<IpaRecording>('/ipa/recordings', { lang, text, provider }),
 
   // English words & images
   englishWords: (q: string) => get<string[]>(`/english/words${query({ q })}`),

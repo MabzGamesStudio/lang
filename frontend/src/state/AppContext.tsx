@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api, errorMessage } from '../api';
+import { clearAudioCache } from '../lib/audio';
 import type { AppSettings, JobInfo, LanguageSummary } from '../../../shared/types';
 
 export interface Toast {
@@ -122,6 +123,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (previous === 'running' && job.status !== 'running') {
           finished = true;
           if (job.status === 'done') notify(`${job.title}: ${job.message}`, 'success');
+          // New recordings replace old ones: fetch audio afresh.
+          if (job.type.startsWith('fix-audio')) clearAudioCache();
           if (job.status === 'error') notify(`${job.title} failed: ${job.error}`, 'error');
         }
         knownJobs.current.set(job.id, job.status);

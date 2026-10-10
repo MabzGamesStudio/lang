@@ -23,7 +23,14 @@ import type { LanguageSummary } from '../../../../shared/types';
 const PAGE_SIZE = 9;
 const indexCache = new Map<string, Promise<PreparedEntry[]>>();
 
-function useInputIndex(language: LanguageSummary, method: ResolvedInputMethod): PreparedEntry[] | null {
+// What the answer box needs to know about the language typed (IPA is typed
+// like a language too).
+export type TypingLanguage = Pick<
+  LanguageSummary,
+  'id' | 'code' | 'locale' | 'rtl' | 'inputMethod' | 'extraCharacters' | 'autoCharacters' | 'wordCount' | 'definedWordCount'
+>;
+
+function useInputIndex(language: TypingLanguage, method: ResolvedInputMethod): PreparedEntry[] | null {
   const [entries, setEntries] = useState<PreparedEntry[] | null>(null);
   const needed = method === 'pinyin' || method === 'japanese';
   const key = `${language.id}:${method}:${language.wordCount}:${language.definedWordCount}`;
@@ -64,6 +71,7 @@ function methodLabel(method: ResolvedInputMethod, code: string): string {
       return '한글';
     case 'phonetic': {
       const base = code.split('-')[0];
+      if (base === 'ipa') return 'IPA';
       if (base === 'el') return 'Ελλ';
       if (['hi', 'mr', 'ne'].includes(base)) return 'देव';
       return 'Кир';
@@ -81,7 +89,7 @@ function japaneseCandidates(entries: PreparedEntry[], kana: string): string[] {
 }
 
 export interface ForeignInputProps {
-  language: LanguageSummary;
+  language: TypingLanguage;
   value: string;
   onChange: (value: string) => void;
   // Enter with nothing being composed (the final text is passed along).
@@ -93,6 +101,10 @@ export interface ForeignInputProps {
   disabled?: boolean;
   autoFocus?: boolean;
   showHelp?: boolean;
+  // Letter buttons even while typing converts (the IPA keyboard).
+  alwaysShowLetters?: boolean;
+  // Shift + click on a letter button gives its capital (not for IPA).
+  capitals?: boolean;
 }
 
 export default function ForeignInput({
@@ -107,6 +119,8 @@ export default function ForeignInput({
   disabled = false,
   autoFocus = false,
   showHelp = true,
+  alwaysShowLetters = false,
+  capitals = true,
 }: ForeignInputProps) {
   const localRef = useRef<HTMLInputElement>(null);
   const inputRef = externalRef ?? localRef;
@@ -250,6 +264,15 @@ export default function ForeignInput({
 
   const insert = (char: string) => {
     const input = inputRef.current;
+    if (pending) {
+      // What is being composed is finished first; the letter goes after it.
+      const next = commit(undefined, char);
+      requestAnimationFrame(() => {
+        input?.focus();
+        input?.setSelectionRange(next.length, next.length);
+      });
+      return;
+    }
     const start = input?.selectionStart ?? value.length;
     const end = input?.selectionEnd ?? start;
     onChange(value.slice(0, start) + char + value.slice(end));
@@ -271,7 +294,7 @@ export default function ForeignInput({
     inputRef.current?.focus();
   };
 
-  const showLetters = method === 'letters' || (isComposingMethod(method) && !enabled);
+  const showLetters = alwaysShowLetters || method === 'letters' || (isComposingMethod(method) && !enabled);
   const letters = useMemo(() => (showLetters ? typingCharacters(language) : []), [showLetters, language]);
   const label = methodLabel(method, language.code);
 
@@ -296,7 +319,7 @@ export default function ForeignInput({
           autoCorrect="off"
           autoCapitalize="off"
           spellCheck={false}
-          lang={language.code}
+          lang={language.code === 'ipa' ? 'und-fonipa' : language.code}
           dir={language.rtl ? 'rtl' : 'ltr'}
         />
         {isComposingMethod(method) && !readOnly && (
@@ -340,7 +363,9 @@ export default function ForeignInput({
           )}
         </div>
       )}
-      {!readOnly && letters.length > 0 && <ExtraCharacters characters={letters} inputRef={inputRef} onInsert={insert} rtl={language.rtl} />}
+      {!readOnly && letters.length > 0 && (
+        <ExtraCharacters characters={letters} inputRef={inputRef} onInsert={insert} rtl={language.rtl} capitals={capitals} />
+      )}
       {helpOpen && <InputHelp method={method} code={language.code} />}
     </div>
   );
@@ -383,9 +408,17 @@ function InputHelp({ method, code }: { method: ResolvedInputMethod; code: string
   if (!scheme) return null;
   return (
     <div className="ime-help">
-      <p>
-        Type with Latin letters; the longest match wins. Type <kbd>|</kbd> between letters to keep them apart.
-      </p>
+      {scheme.id === 'ipa' ? (
+        <p>
+          X-SAMPA: IPA typed with plain keys. Upper and lower case are different sounds (<kbd>s</kbd> s, <kbd>S</kbd> ʃ), and{' '}
+          <kbd>\</kbd> or <kbd>`</kbd> after a letter give more (<kbd>r\</kbd> ɹ, <kbd>t`</kbd> ʈ). Or click the symbols. Type{' '}
+          <kbd>|</kbd> to keep keys apart.
+        </p>
+      ) : (
+        <p>
+          Type with Latin letters; the longest match wins. Type <kbd>|</kbd> between letters to keep them apart.
+        </p>
+      )}
       <div className="ime-table">
         {phoneticHelp(scheme).map(([latin, output]) => (
           <span key={latin + output}>

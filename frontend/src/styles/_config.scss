@@ -134,3 +134,117 @@
 .undefined-count strong {
   color: $warning;
 }
+
+// Configuration → Sentences: reported sentences and where things came from.
+.reported-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: $space-md;
+  margin-bottom: $space-md;
+}
+
+.reported-card {
+  padding: $space-md;
+  border-radius: $radius-md;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+
+  h3 {
+    margin: 0 0 $space-xs;
+    font-size: 1rem;
+  }
+
+  p {
+    margin: 0 0 $space-sm;
+    font-size: 0.85rem;
+  }
+
+  .row {
+    align-items: flex-end;
+  }
+}
+
+.table.sentences {
+  .sentence-text {
+    display: flex;
+    align-items: flex-start;
+    gap: $space-xs;
+  }
+
+  .origin {
+    font-size: 0.78rem;
+    margin-top: 2px;
+  }
+
+  tr.excluded .sentence-text {
+    opacity: 0.6;
+  }
+
+  select.status-excluded {
+    border-color: rgba(245, 158, 11, 0.6);
+    color: #fbbf24;
+  }
+}
+
+.table.voice-options {
+  font-size: 0.85rem;
+
+  td {
+    vertical-align: top;
+  }
+}
+
+// Sources of meanings, translations and recordings.
+.gloss-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  margin: 0 6px 2px 0;
+
+  small {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 0 0.35rem;
+  }
+}
+
+.sourced + .sourced::before {
+  content: ' · ';
+}
+
+.sentence-details {
+  display: flex;
+  flex-direction: column;
+  gap: $space-xs;
+  margin-top: $space-xs;
+  padding: $space-sm;
+  border-radius: $radius-sm;
+  background: var(--surface-2);
+  font-size: 0.82rem;
+}
+
+.recordings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+
+  .recording,
+  .recording-add {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+  }
+
+  select {
+    padding: 0.1rem 0.3rem;
+    font-size: 0.8rem;
+  }
+}
+
+.icon-button.active {
+  color: var(--primary);
+  background: var(--surface-2);
+}

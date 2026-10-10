@@ -6,6 +6,9 @@ export interface Token {
   word: string; // normalised (NFC, lower-cased) form used as the dictionary key
   capitalized: boolean;
   sentenceInitial: boolean;
+  // Position in the text: surface = text.slice(start, end).
+  start: number;
+  end: number;
 }
 
 export interface ProcessedSentence {
@@ -113,6 +116,8 @@ export function tokenize(text: string, locale: string, wordSegmenter?: Intl.Segm
       word,
       capitalized: isCapitalized(part.segment, locale),
       sentenceInitial: tokens.length === 0,
+      start: part.index,
+      end: part.index + part.segment.length,
     });
   }
   return tokens;

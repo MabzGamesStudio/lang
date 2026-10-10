@@ -15,7 +15,7 @@ function collator(locale: string): Intl.Collator {
 
 // Letters offered as buttons: the language's own list, or the automatic one
 // (most used first; a whole alphabet in alphabetical order, marks last).
-export function typingCharacters(language: LanguageSummary): string[] {
+export function typingCharacters(language: Pick<LanguageSummary, 'extraCharacters' | 'autoCharacters' | 'locale'>): string[] {
   if (language.extraCharacters.length) return language.extraCharacters;
   const auto = language.autoCharacters;
   if (auto.length <= SHORT_LIST) return auto;
@@ -26,18 +26,21 @@ export function typingCharacters(language: LanguageSummary): string[] {
 
 // One-click buttons for letters that are hard to type (ñ, é, ü...). While the
 // answer box is focused, digits 1-9/0 insert the first ten of a short list.
-// Shift + click inserts the capital letter.
+// Shift + click inserts the capital letter (unless `capitals` is off).
 export default function ExtraCharacters({
   characters,
   inputRef,
   onInsert,
   rtl = false,
+  capitals = true,
 }: {
   characters: string[];
   inputRef: RefObject<HTMLInputElement | null>;
   onInsert: (char: string) => void;
   rtl?: boolean;
+  capitals?: boolean;
 }) {
+  const withShift = (char: string, shift: boolean) => (shift && capitals ? char.toLocaleUpperCase() : char);
   const keyboard = characters.length > SHORT_LIST;
 
   useEffect(() => {
@@ -49,11 +52,11 @@ export default function ExtraCharacters({
       const char = characters[index];
       if (!char) return;
       event.preventDefault();
-      onInsert(event.shiftKey ? char.toLocaleUpperCase() : char);
+      onInsert(withShift(char, event.shiftKey));
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [characters, inputRef, onInsert, keyboard]);
+  }, [characters, inputRef, onInsert, keyboard, capitals]);
 
   if (characters.length === 0) return null;
   return (
@@ -64,7 +67,7 @@ export default function ExtraCharacters({
           type="button"
           tabIndex={-1}
           onMouseDown={(event) => event.preventDefault()}
-          onClick={(event) => onInsert(event.shiftKey ? char.toLocaleUpperCase() : char)}
+          onClick={(event) => onInsert(withShift(char, event.shiftKey))}
         >
           {!keyboard && index < 10 && <sup>{index === 9 ? 0 : index + 1}</sup>}
           <span>{char}</span>
