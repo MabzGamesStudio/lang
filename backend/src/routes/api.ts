@@ -83,18 +83,9 @@ import {
   ttsGenerates,
 } from '../providers/speech.js';
 import { suggestImages } from '../providers/images.js';
-import {
-  addIpaRecording,
-  applyIpaResults,
-  deleteIpaRecording,
-  ipaAudio,
-  ipaRecordingFile,
-  ipaSummary,
-  nextIpaQuestion,
-  resetIpaProgress,
-  startIpaDownload,
-} from '../services/ipa.js';
-import { isIpaGameId, type IpaResult } from '../../../shared/ipa/games.js';
+import { addIpaRecording, deleteIpaRecording, ipaAudio, ipaRecordingFile, ipaSummary, nextIpaQuestion, startIpaDownload } from '../services/ipa.js';
+import { applyIpaResults, ipaProgressSummary, ipaSessionNext, resetIpaProgress } from '../services/ipaProgress.js';
+import { isIpaGameId, type IpaResult, type IpaScope } from '../../../shared/ipa/games.js';
 import { chat, judgeTranslation, llmAvailable } from '../providers/llm.js';
 import { PHASES, isGameId, type GameId } from '../../../shared/games.js';
 import type { SentenceExclusion, TranslationProvider, TtsProvider, WordResult } from '../../../shared/types.js';
@@ -745,18 +736,36 @@ export function apiRouter(): Router {
     res.json(await addIpaRecording(str(req.body?.lang), str(req.body?.text), TTS_PROVIDERS.includes(provider) ? provider : undefined));
   });
 
+  // Which sounds and words: all sounds or the English ones; the example words
+  // or the words of one of your languages.
+  const ipaScope = (source: Record<string, unknown> | undefined): IpaScope => {
+    const words = str(source?.words) || 'examples';
+    if (words !== 'examples') languageDb(words);
+    return { sounds: source?.sounds === 'all' ? 'all' : 'english', words };
+  };
+  const recentSounds = (value: unknown): string[] => (Array.isArray(value) ? value.map(String).slice(0, 10) : []);
+
   api.post('/ipa/next', (req, res) => {
     const gameId: unknown = req.body?.gameId;
     if (!isIpaGameId(gameId)) throw new HttpError(400, 'Unknown pronunciation game');
-    const recent: unknown[] = Array.isArray(req.body?.recent) ? req.body.recent : [];
+    res.json(nextIpaQuestion({ gameId, recent: recentSounds(req.body?.recent), ...ipaScope(req.body) }));
+  });
+
+  // Personal progress of the pronunciation mode.
+  api.post('/ipa/session/next', (req, res) => {
+    const lastGameId: unknown = req.body?.lastGameId;
     res.json(
-      nextIpaQuestion({
-        gameId,
-        recent: recent.map(String).slice(0, 10),
-        sounds: req.body?.sounds === 'all' ? 'all' : 'english',
-        words: str(req.body?.words) || 'examples',
+      ipaSessionNext({
+        mode: req.body?.mode === 'review' ? 'review' : 'learn',
+        recent: recentSounds(req.body?.recent),
+        lastGameId: isIpaGameId(lastGameId) ? lastGameId : null,
+        ...ipaScope(req.body),
       })
     );
+  });
+
+  api.get('/ipa/progress', (req, res) => {
+    res.json(ipaProgressSummary(ipaScope(req.query as Record<string, unknown>)));
   });
 
   api.post('/ipa/results', (req, res) => {
@@ -769,7 +778,7 @@ export function apiRouter(): Router {
         PHASES.includes((item as IpaResult).phase) &&
         typeof (item as IpaResult).correct === 'boolean'
     );
-    res.json({ levels: applyIpaResults(results) });
+    res.json(applyIpaResults(results, ipaScope(req.body)));
   });
 
   api.post('/ipa/reset', (_req, res) => {

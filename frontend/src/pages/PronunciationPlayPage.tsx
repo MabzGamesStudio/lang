@@ -1,5 +1,7 @@
+import { useCallback, useMemo } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
+import { api } from '../api';
 import { useApp } from '../state/AppContext';
 import { useStoredState } from '../lib/hooks';
 import IpaRunner from '../components/ipa/IpaRunner';
@@ -14,6 +16,9 @@ export default function PronunciationPlayPage() {
   const [sounds, setSounds] = useStoredState<IpaSoundSet>('lang.ipa.sounds', 'english');
   const [words] = useStoredState<string>('lang.ipa.words', 'examples');
   const game = isIpaGameId(gameId) ? IPA_GAMES_BY_ID[gameId] : null;
+  const language = words === 'examples' ? null : languages.find((entry) => entry.id === words) ?? null;
+  const scope = useMemo(() => ({ sounds, words: language ? language.id : 'examples' }), [sounds, language]);
+  const fetchNext = useCallback((recent: string[]) => api.ipaNext({ gameId: game!.id, recent, ...scope }), [game, scope]);
 
   if (!game) {
     return (
@@ -24,7 +29,6 @@ export default function PronunciationPlayPage() {
     );
   }
   if (!settings) return null;
-  const language = words === 'examples' ? null : languages.find((entry) => entry.id === words) ?? null;
 
   return (
     <div className="page play">
@@ -48,7 +52,13 @@ export default function PronunciationPlayPage() {
           <span className="muted">Words: {language ? `${language.name} words` : 'example words'}</span>
         </div>
       </header>
-      <IpaRunner key={`${game.id}:${sounds}:${words}`} game={game} sounds={sounds} words={language ? language.id : 'examples'} settings={settings} language={language} />
+      <IpaRunner
+        key={`${game.id}:${scope.sounds}:${scope.words}`}
+        fetchNext={fetchNext}
+        scope={scope}
+        settings={settings}
+        language={language}
+      />
     </div>
   );
 }

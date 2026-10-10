@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3';
 
 export const LANGUAGE_SCHEMA_VERSION = 3;
-export const ENGLISH_SCHEMA_VERSION = 2;
+export const ENGLISH_SCHEMA_VERSION = 3;
 
 const LANGUAGE_SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (
@@ -192,7 +192,19 @@ CREATE TABLE IF NOT EXISTS ipa_progress (
   translate_level INTEGER NOT NULL DEFAULT 0,
   correct INTEGER NOT NULL DEFAULT 0,
   wrong INTEGER NOT NULL DEFAULT 0,
-  last_seen_at INTEGER
+  last_seen_at INTEGER,
+  first_seen_at INTEGER,
+  srs_stage INTEGER NOT NULL DEFAULT 0,
+  learned_at INTEGER,
+  next_review_at INTEGER,
+  review_started_at INTEGER,
+  review_errors INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS ipa_activity (
+  day TEXT PRIMARY KEY,
+  correct INTEGER NOT NULL DEFAULT 0,
+  wrong INTEGER NOT NULL DEFAULT 0
 );
 `;
 
@@ -210,7 +222,8 @@ function schemaVersion(db: Database.Database): number {
 // English database versions: 2 adds the pronunciation mode, recordings of
 // sounds and example words (ipa_audio: lang "ipa" for a sound on its own,
 // source "commons:<file>" or a voice key) and progress per sound
-// (ipa_progress). Only new tables, so no upgrade steps are needed.
+// (ipa_progress). 3 adds the repetition schedule of each sound (like words:
+// srs_stage, next_review_at…) and the answers per day (ipa_activity).
 
 // Changes to tables of existing databases, by the schema version they lead to.
 // New databases get the columns from the CREATE TABLE statements directly.
@@ -257,6 +270,20 @@ const LANGUAGE_UPGRADES: Record<number, Upgrade> = {
   },
 };
 
+const ENGLISH_UPGRADES: Record<number, Upgrade> = {
+  3: (db) => {
+    // Version 1 databases get the whole table from the schema.
+    if (!db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'ipa_progress'`).get()) return;
+    db.exec(`ALTER TABLE ipa_progress ADD COLUMN first_seen_at INTEGER;
+      ALTER TABLE ipa_progress ADD COLUMN srs_stage INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE ipa_progress ADD COLUMN learned_at INTEGER;
+      ALTER TABLE ipa_progress ADD COLUMN next_review_at INTEGER;
+      ALTER TABLE ipa_progress ADD COLUMN review_started_at INTEGER;
+      ALTER TABLE ipa_progress ADD COLUMN review_errors INTEGER NOT NULL DEFAULT 0;
+      UPDATE ipa_progress SET first_seen_at = last_seen_at;`);
+  },
+};
+
 function migrate(db: Database.Database, schema: string, kind: string, version: number, upgrades: Record<number, Upgrade> = {}): void {
   const current = schemaVersion(db);
   if (current > version) {
@@ -281,7 +308,7 @@ export function migrateLanguageDb(db: Database.Database): void {
 }
 
 export function migrateEnglishDb(db: Database.Database): void {
-  migrate(db, ENGLISH_SCHEMA, 'english', ENGLISH_SCHEMA_VERSION);
+  migrate(db, ENGLISH_SCHEMA, 'english', ENGLISH_SCHEMA_VERSION, ENGLISH_UPGRADES);
 }
 
 export function readMeta(db: Database.Database, key: string): string | null {

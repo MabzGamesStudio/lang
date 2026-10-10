@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { Eye, Loader2, Volume2 } from 'lucide-react';
 import { api, errorMessage } from '../../api';
 import { useApp } from '../../state/AppContext';
@@ -7,11 +7,21 @@ import { playIpa, prefetchIpa, stopAudio } from '../../lib/audio';
 import type { IpaOutcome } from '../../lib/ipaEvaluate';
 import { AudioChoices, TextChoices, TypedIpaAnswer, wordLang, wordSide } from './IpaAnswers';
 import IpaFeedback, { soundRef } from './IpaFeedback';
+import IpaBatchPreview from './IpaBatchPreview';
 import { PHASE_LABELS } from '../../../../shared/games';
-import type { IpaGameDef, IpaQuestion, IpaSoundSet } from '../../../../shared/ipa/games';
+import {
+  IPA_GAMES_BY_ID,
+  type IpaGameDef,
+  type IpaGameId,
+  type IpaNextResponse,
+  type IpaNotice,
+  type IpaQuestion,
+  type IpaResultsResponse,
+  type IpaScope,
+} from '../../../../shared/ipa/games';
 import type { AppSettings, LanguageSummary } from '../../../../shared/types';
 
-type Stage = 'loading' | 'answering' | 'feedback' | 'notice' | 'error';
+type Stage = 'loading' | 'preview' | 'answering' | 'feedback' | 'notice' | 'error';
 
 function IpaPrompt({
   question,
@@ -134,30 +144,51 @@ function IpaPrompt({
   );
 }
 
-// Drives a pronunciation game: fetch a question, take the answer, give
-// feedback, record the result per sound, move on.
-export default function IpaRunner({
-  game,
-  sounds,
-  words,
-  settings,
-  language,
-}: {
-  game: IpaGameDef;
-  sounds: IpaSoundSet;
-  words: string;
+export interface IpaRunnerProps {
+  // The next question: of one game (free practice) or the one Personal progress chooses.
+  fetchNext: (recent: string[], lastGameId: IpaGameId | null) => Promise<IpaNextResponse>;
+  // Sounds and words practised (sent with the results).
+  scope: IpaScope;
   settings: AppSettings;
   language: LanguageSummary | null;
-}) {
+  // Changing the key restarts the runner.
+  resetKey?: string;
+  // Personal progress: the sounds of a batch are shown before its questions.
+  showPreview?: boolean;
+  onUpdate?: (response: IpaNextResponse) => void;
+  onResults?: (results: IpaResultsResponse) => void;
+  renderNotice?: (notice: IpaNotice, retry: () => void) => ReactNode;
+  paused?: boolean;
+}
+
+// Drives the pronunciation games: fetch a question, take the answer, give
+// feedback, record the result per sound, move on.
+export default function IpaRunner({
+  fetchNext,
+  scope,
+  settings,
+  language,
+  resetKey,
+  showPreview = false,
+  onUpdate,
+  onResults,
+  renderNotice,
+  paused = false,
+}: IpaRunnerProps) {
   const { notify, saveSettings } = useApp();
   const [stage, setStage] = useState<Stage>('loading');
-  const [question, setQuestion] = useState<IpaQuestion | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [response, setResponse] = useState<IpaNextResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<IpaOutcome | null>(null);
   const [revealed, setRevealed] = useState(false);
   const recent = useRef<string[]>([]);
+  const lastGame = useRef<IpaGameId | null>(null);
+  const previewed = useRef(new Set<string>());
   const advanceTimer = useRef<number | undefined>(undefined);
+  const fetchRef = useRef(fetchNext);
+  fetchRef.current = fetchNext;
+  const callbacks = useRef({ onUpdate, onResults });
+  callbacks.current = { onUpdate, onResults };
 
   const load = useCallback(async () => {
     window.clearTimeout(advanceTimer.current);
@@ -166,40 +197,63 @@ export default function IpaRunner({
     setOutcome(null);
     setRevealed(false);
     try {
-      const next = await api.ipaNext({ gameId: game.id, recent: recent.current, sounds, words });
+      const next = await fetchRef.current(recent.current, lastGame.current);
+      setResponse(next);
+      callbacks.current.onUpdate?.(next);
       if (!next.question) {
-        setQuestion(null);
-        setNotice(next.notice);
         setStage('notice');
         return;
       }
-      setQuestion(next.question);
       if (next.question.audio) prefetchIpa(next.question.audio);
       for (const option of next.question.options ?? []) if (option.audio) prefetchIpa(option.audio);
-      setStage('answering');
+      // Before the questions of a batch, its sounds are shown once (per batch
+      // and phase, or per batch in batch-by-batch order).
+      const state = next.state;
+      const previewMode = settings.learning.batchPreview;
+      const wanted = previewMode === 'every' || (previewMode === 'new' && state?.newBatch);
+      const key = state ? (settings.learning.progressionOrder === 'batch' ? `${state.batch}` : `${state.batch}:${state.phase}`) : '';
+      if (showPreview && state?.mode === 'learn' && wanted && state.batchSounds.length > 0 && !previewed.current.has(key)) {
+        previewed.current.add(key);
+        setStage('preview');
+      } else {
+        setStage('answering');
+      }
     } catch (err) {
       setError(errorMessage(err));
       setStage('error');
     }
-  }, [game.id, sounds, words]);
+  }, [showPreview, settings.learning.batchPreview, settings.learning.progressionOrder]);
 
   useEffect(() => {
     recent.current = [];
+    lastGame.current = null;
     void load();
     return () => {
       window.clearTimeout(advanceTimer.current);
       stopAudio();
     };
-  }, [load]);
+    // Restart only when the reset key changes.
+  }, [resetKey]);
+
+  useEffect(() => {
+    if (paused) window.clearTimeout(advanceTimer.current);
+  }, [paused]);
+
+  const question = response?.question ?? null;
+  const game = question ? IPA_GAMES_BY_ID[question.gameId] : null;
 
   const submit = useCallback(
     (result: IpaOutcome) => {
-      if (!question) return;
+      if (!question || !game) return;
       setOutcome(result);
       setStage('feedback');
       recent.current = [question.symbol, ...recent.current.filter((symbol) => symbol !== question.symbol)].slice(0, 6);
+      lastGame.current = question.gameId;
       if (result.results.length) {
-        api.ipaResults(result.results).catch((err) => notify(`Result not saved: ${errorMessage(err)}`, 'error'));
+        api
+          .ipaResults(result.results, scope)
+          .then((saved) => callbacks.current.onResults?.(saved))
+          .catch((err) => notify(`Result not saved: ${errorMessage(err)}`, 'error'));
       }
       if (!result.correct && settings.learning.playAudioOnFeedback) {
         void playIpa(question.word?.audio ?? soundRef(question.symbol), settings.tts.rate || 1);
@@ -208,9 +262,9 @@ export default function IpaRunner({
       const typed = game.response === 'symbolTyped' || game.response === 'ipaTyped' || game.response === 'wordTyped';
       // Accepted but not typed exactly: stay so the exact answer can be seen.
       const hold = settings.learning.pauseOnInexact && typed && result.quality !== 'exact';
-      if (result.correct && delay > 0 && !hold) advanceTimer.current = window.setTimeout(() => void load(), delay);
+      if (result.correct && delay > 0 && !hold && !paused) advanceTimer.current = window.setTimeout(() => void load(), delay);
     },
-    [question, game.response, settings, notify, load]
+    [question, game, scope, settings, notify, load, paused]
   );
 
   useKey(
@@ -219,7 +273,7 @@ export default function IpaRunner({
       event.preventDefault();
       setRevealed(true);
     },
-    { enabled: stage === 'answering' && Boolean(game.memorize) && !revealed, inInputs: true }
+    { enabled: stage === 'answering' && Boolean(game?.memorize) && !revealed, inInputs: true }
   );
 
   if (stage === 'loading' && !question) {
@@ -239,19 +293,26 @@ export default function IpaRunner({
       </div>
     );
   }
-  if (stage === 'notice') {
+  if (stage === 'notice' && response?.notice) {
     return (
       <div className="runner">
-        <div className="notice">
-          <p>{notice}</p>
-          <button className="button" onClick={() => void load()}>
-            Try again
-          </button>
-        </div>
+        {renderNotice ? (
+          renderNotice(response.notice, () => void load())
+        ) : (
+          <div className="notice">
+            <p>{response.notice.message}</p>
+            <button className="button" onClick={() => void load()}>
+              Try again
+            </button>
+          </div>
+        )}
       </div>
     );
   }
-  if (!question) return null;
+  if (stage === 'preview' && response?.state) {
+    return <IpaBatchPreview state={response.state} settings={settings} onStart={() => setStage('answering')} />;
+  }
+  if (!question || !game) return null;
 
   const textScale = settings.learning.questionTextScale || 100;
   const resize = (step: number) =>
