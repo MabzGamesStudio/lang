@@ -22,6 +22,9 @@ export function voiceLabel(key: string | null): string {
       return `Azure Speech · ${rest.join(':')}`;
     case 'elevenlabs':
       return `ElevenLabs · ${rest.join(' · ')}`;
+    case 'legacy-male':
+    case 'legacy-female':
+      return `earlier version of the app (${service.slice('legacy-'.length)} voice)`;
     default:
       return key;
   }
@@ -34,10 +37,18 @@ export function translationSourceLabel(source: string | null): string {
   if (source === 'google') return 'Google Translate';
   if (source === 'libretranslate') return 'LibreTranslate';
   if (source === 'legacy') return 'earlier version of the app';
+  if (source === 'unknown') return 'unknown source';
   if (source.startsWith('llm:colab:')) return `Colab · ${source.slice('llm:colab:'.length)}`;
   if (source.startsWith('llm:')) return `LLM · ${source.slice(4)}`;
   if (source === 'llm') return 'language model';
   return source;
+}
+
+// Where an English meaning of a word came from.
+export function definitionSourceLabel(source: string | null): string {
+  if (!source || source === 'unknown') return 'unknown source';
+  if (source === 'wiktionary') return 'Wiktionary';
+  return translationSourceLabel(source);
 }
 
 export const TRANSLATION_SERVICES: { value: TranslationProvider; label: string; ready: (settings: AppSettings) => boolean }[] = [
@@ -55,3 +66,10 @@ export const VOICE_SERVICES: { value: Exclude<TtsProvider, 'browser'>; label: st
   { value: 'google', label: 'Google Cloud', ready: (s) => Boolean(s.tts.google.apiKey) },
   { value: 'openai', label: 'OpenAI-compatible API', ready: (s) => Boolean(s.tts.openai.baseUrl) },
 ];
+
+// Where a recording of the pronunciation mode came from: a file on Wikimedia
+// Commons ("commons:Voiceless dental fricative.ogg") or a voice service.
+export function ipaRecordingLabel(source: string): string {
+  if (source.startsWith('commons:')) return `Wikimedia Commons · ${source.slice('commons:'.length)}`;
+  return voiceLabel(source);
+}

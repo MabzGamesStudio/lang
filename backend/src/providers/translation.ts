@@ -3,6 +3,7 @@ import { getLanguageConfig } from '../services/languages.js';
 import { getSettings } from '../services/settings.js';
 import { postJson } from '../services/http.js';
 import { saveSentenceTranslations } from '../services/words.js';
+import { addSentenceTranslations, cleanTranslation, removeSentenceTranslation } from '../services/sentenceTranslations.js';
 import { recomputeRanks, refreshSentenceCounts, wordIdsOfSentences } from '../services/ranking.js';
 import { wordIdFor } from '../services/corpus.js';
 import { tokenize, tidySentence } from '../services/textProcessing.js';
@@ -15,8 +16,9 @@ interface SentenceToTranslate {
   text: string;
 }
 
-// Untranslated sentences in the order they will be needed: for each word,
-// the easiest sentences (lowest "hardest word" rank) first.
+// Untranslated sentences in the order they will be needed. For the words of a
+// batch, sentences are picked at random (a variety of texts), preferring ones
+// whose rarest word is not far beyond the word itself.
 export function sentencesNeedingTranslation(
   db: DB,
   options: { limit?: number; wordIds?: number[]; perWord?: number }
@@ -25,24 +27,26 @@ export function sentencesNeedingTranslation(
     const perWord = options.perWord ?? 4;
     const statement = db.prepare(
       `SELECT s.id, s.text FROM sentences s
-       WHERE s.english IS NULL AND s.excluded_reason IS NULL AND s.id IN (SELECT sentence_id FROM sentence_words WHERE word_id = ?)
-       ORDER BY s.max_rank IS NULL, s.max_rank, s.word_count LIMIT ?`
+       WHERE s.english IS NULL AND (s.excluded_reason IS NULL OR s.excluded_reason = 'audio')
+         AND s.id IN (SELECT sentence_id FROM sentence_words WHERE word_id = ?)
+       ORDER BY s.max_rank IS NULL, s.max_rank > COALESCE((SELECT rank FROM words WHERE id = ?), 0) + 500, RANDOM() LIMIT ?`
     );
     const translatedCount = db.prepare(
       `SELECT COUNT(DISTINCT sw.sentence_id) AS n FROM sentence_words sw JOIN sentences s ON s.id = sw.sentence_id
-       WHERE sw.word_id = ? AND s.english IS NOT NULL AND s.excluded_reason IS NULL`
+       WHERE sw.word_id = ? AND s.english IS NOT NULL AND (s.excluded_reason IS NULL OR s.excluded_reason = 'audio')`
     );
     const chosen = new Map<number, SentenceToTranslate>();
     for (const wordId of options.wordIds) {
       const have = (translatedCount.get(wordId) as { n: number }).n;
       if (have >= perWord) continue;
-      for (const row of statement.all(wordId, perWord - have) as SentenceToTranslate[]) chosen.set(row.id, row);
+      for (const row of statement.all(wordId, wordId, perWord - have) as SentenceToTranslate[]) chosen.set(row.id, row);
     }
     return [...chosen.values()];
   }
   return db
     .prepare(
-      `SELECT id, text FROM sentences WHERE english IS NULL AND excluded_reason IS NULL AND max_rank IS NOT NULL
+      `SELECT id, text FROM sentences WHERE english IS NULL AND (excluded_reason IS NULL OR excluded_reason = 'audio')
+         AND max_rank IS NOT NULL
        ORDER BY max_rank, word_count LIMIT ?`
     )
     .all(options.limit ?? 100) as SentenceToTranslate[];
@@ -212,20 +216,19 @@ export async function retranslateSentences(
   }
   const rows = (
     options.ids?.length
-      ? db.prepare(`SELECT id, text, english FROM sentences WHERE id IN (SELECT value FROM json_each(?))`).all(JSON.stringify(options.ids))
+      ? db
+          .prepare(`SELECT id, text, english, excluded_reason AS reason FROM sentences WHERE id IN (SELECT value FROM json_each(?))`)
+          .all(JSON.stringify(options.ids))
       : db
-          .prepare(`SELECT id, text, english FROM sentences WHERE excluded_reason = 'translation' ORDER BY max_rank IS NULL, max_rank`)
+          .prepare(
+            `SELECT id, text, english, excluded_reason AS reason FROM sentences WHERE excluded_reason = 'translation' ORDER BY max_rank IS NULL, max_rank`
+          )
           .all()
-  ) as { id: number; text: string; english: string | null }[];
+  ) as { id: number; text: string; english: string | null; reason: string | null }[];
   if (rows.length === 0) return 'No sentences are marked as badly translated';
   const batchSize = Math.max(1, provider === 'llm' ? settings.translation.batchSize : 40);
   const label = translationLabel(provider);
-  const save = db.prepare(
-    `UPDATE sentences SET english = ?, translation_source = ?,
-       excluded_at = CASE WHEN excluded_reason = 'translation' THEN NULL ELSE excluded_at END,
-       excluded_reason = CASE WHEN excluded_reason = 'translation' THEN NULL ELSE excluded_reason END
-     WHERE id = ?`
-  );
+  const restore = db.prepare(`UPDATE sentences SET excluded_reason = NULL, excluded_at = NULL WHERE id = ? AND excluded_reason = 'translation'`);
   let fixed = 0;
   let unchanged = 0;
   const failures: string[] = [];
@@ -236,18 +239,24 @@ export async function retranslateSentences(
     try {
       const reported = new Map(batch.filter((row) => row.english).map((row) => [row.id, row.english!]));
       const translations = await translateBatch(batch, config, provider, reported.size ? reported : undefined);
-      db.transaction(() => {
-        for (const row of batch) {
-          const english = translations.get(row.id)?.replace(/\s+/g, ' ').trim();
-          if (!english) continue;
-          if (row.english && sameTranslation(english, row.english)) {
-            unchanged++;
-            continue;
-          }
-          save.run(english, label, row.id);
-          fixed++;
+      for (const row of batch) {
+        const english = cleanTranslation(translations.get(row.id) ?? '');
+        if (!english) continue;
+        if (row.english && sameTranslation(english, row.english)) {
+          unchanged++;
+          continue;
         }
-      })();
+        if (row.reason === 'translation') {
+          // The reported translation goes; the new one becomes the main one.
+          if (row.english) removeSentenceTranslation(db, row.id, row.english);
+          addSentenceTranslations(db, [{ id: row.id, english }], label, { main: true });
+          restore.run(row.id);
+        } else {
+          // Not reported: the new translation is added as another one.
+          addSentenceTranslations(db, [{ id: row.id, english }], label);
+        }
+        fixed++;
+      }
     } catch (error) {
       failures.push((error as Error).message);
       if (fixed === 0 && failures.length >= 3) throw new Error(`Translation failed: ${failures[0]}`);
@@ -335,10 +344,9 @@ Target words: ${JSON.stringify(batch.map((t) => t.word))}`,
       );
       const items = extractItems<{ word?: unknown; text?: unknown; english?: unknown }>(reply);
       const sentenceIds: number[] = [];
+      const translations: { id: number; english: string }[] = [];
       db.transaction(() => {
-        const insertSentence = db.prepare(
-          `INSERT OR IGNORE INTO sentences (text, english, translation_source, source_id, word_count) VALUES (?, ?, ?, ?, ?)`
-        );
+        const insertSentence = db.prepare(`INSERT OR IGNORE INTO sentences (text, source_id, word_count) VALUES (?, ?, ?)`);
         const insertWord = db.prepare(`INSERT INTO sentence_words (sentence_id, position, word_id) VALUES (?, ?, ?)`);
         for (const item of items) {
           if (typeof item.text !== 'string' || typeof item.english !== 'string') continue;
@@ -346,9 +354,10 @@ Target words: ${JSON.stringify(batch.map((t) => t.word))}`,
           const tokens = tokenize(text, config.locale, wordSegmenter);
           const target = batch.find((t) => tokens.some((token) => token.word === t.word));
           if (!target || tokens.length < 2 || tokens.length > config.maxSentenceWords) continue;
-          const result = insertSentence.run(text, item.english.trim(), llmLabel(settings), sourceId, tokens.length);
+          const result = insertSentence.run(text, sourceId, tokens.length);
           if (!result.changes) continue;
           const sentenceId = Number(result.lastInsertRowid);
+          translations.push({ id: sentenceId, english: item.english });
           tokens.forEach((token, position) => insertWord.run(sentenceId, position, wordIdFor(db, token.word, config.locale)));
           sentenceIds.push(sentenceId);
           added++;
@@ -358,6 +367,7 @@ Target words: ${JSON.stringify(batch.map((t) => t.word))}`,
           sourceId
         );
       })();
+      addSentenceTranslations(db, translations, llmLabel(settings));
       recomputeRanks(db);
       refreshSentenceCounts(db, wordIdsOfSentences(db, sentenceIds));
     } catch (error) {

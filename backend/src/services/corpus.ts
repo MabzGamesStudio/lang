@@ -2,6 +2,7 @@ import { HttpError, languageDb, type DB } from '../db/connection.js';
 import { getLanguageConfig } from './languages.js';
 import { cleanBookText, normalizeWord, parseCsv, processText } from './textProcessing.js';
 import { recomputeAll, recomputeRanks } from './ranking.js';
+import { addGlosses } from './glosses.js';
 import { downloadBook, searchGutenberg } from './gutenberg.js';
 import { registerEnglishWords } from './english.js';
 import { yieldToEventLoop, type JobContext } from './jobs.js';
@@ -235,16 +236,15 @@ export async function importWordList(
         .run(input.title, tokenCount, values.length, Date.now()).lastInsertRowid
     );
     const insertCount = db.prepare(`INSERT INTO word_sources (word_id, source_id, count) VALUES (?, ?, ?)`);
-    const setDefinition = db.prepare(
-      `UPDATE words SET english = ?, definition_source = 'word list' WHERE id = ? AND english IS NULL`
-    );
+    const definitionSource = `word list: ${input.title}`;
     const setPronunciation = db.prepare(`UPDATE words SET pronunciation = ? WHERE id = ? AND pronunciation IS NULL`);
     const setPos = db.prepare(`UPDATE words SET pos = ? WHERE id = ? AND pos IS NULL`);
     for (const entry of values) {
       const id = wordIdFor(db, entry.word, config.locale);
       insertCount.run(id, sourceId, Math.round(entry.count ?? 1));
       if (entry.english.length) {
-        setDefinition.run(JSON.stringify(entry.english), id);
+        // Added to any meanings the word already has, with the list as source.
+        addGlosses(db, id, entry.english, definitionSource);
         glosses.push(...entry.english);
       }
       if (entry.pronunciation) setPronunciation.run(entry.pronunciation, id);

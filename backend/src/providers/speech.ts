@@ -8,7 +8,7 @@ import { refreshSentenceCounts, wordIdsOfSentences } from '../services/ranking.j
 import type { JobContext } from '../services/jobs.js';
 import { colabBaseUrl } from './llm.js';
 import { stripParentheticals } from '../../../shared/text.js';
-import type { AppSettings, TtsProvider } from '../../../shared/types.js';
+import type { AppSettings, Recording, TtsProvider } from '../../../shared/types.js';
 
 // ---------------------------------------------------------------------------
 // Text to speech. Generated audio is cached in the database (foreign audio in
@@ -179,10 +179,10 @@ export async function getAudio(target: string, text: string, generate: boolean):
   // Notes in parentheses are never spoken.
   const clean = stripParentheticals(text).slice(0, 500);
   if (!clean) return null;
-  // The current voice first, otherwise the newest recording.
-  const cached = voice.db
-    .prepare(`SELECT mime, data FROM audio WHERE text = ? ORDER BY voice = ? DESC, created_at DESC LIMIT 1`)
-    .get(clean, key) as { mime: string; data: Buffer } | undefined;
+  // Any stored recording: with several voices, a different one each time.
+  const cached = voice.db.prepare(`SELECT mime, data FROM audio WHERE text = ? ORDER BY RANDOM() LIMIT 1`).get(clean) as
+    | { mime: string; data: Buffer }
+    | undefined;
   if (cached) return cached;
   if (!generate || !ttsGenerates(settings)) return null;
   const audio = await synthesize(clean, voice, settings);
@@ -190,6 +190,58 @@ export async function getAudio(target: string, text: string, generate: boolean):
     .prepare(`INSERT OR REPLACE INTO audio (text, voice, mime, data, created_at) VALUES (?, ?, ?, ?, ?)`)
     .run(clean, audio.key ?? key, audio.mime, audio.data, Date.now());
   return { data: audio.data, mime: audio.mime };
+}
+
+// ---------------------------------------------------------------------------
+// Recordings of one text: several voices can be kept, each with its source.
+
+function recordingsDb(target: string): DB {
+  return target === 'english' ? englishDatabase() : languageDb(target);
+}
+
+export function recordingFile(target: string, id: number): { data: Buffer; mime: string } | null {
+  return (recordingsDb(target).prepare(`SELECT mime, data FROM audio WHERE id = ?`).get(id) as { data: Buffer; mime: string } | undefined) ?? null;
+}
+
+export function deleteRecording(target: string, id: number): boolean {
+  return recordingsDb(target).prepare(`DELETE FROM audio WHERE id = ?`).run(id).changes > 0;
+}
+
+// Adds a recording made by the configured voice service, or another one (a
+// recording by the same voice is replaced).
+export async function addRecording(target: string, text: string, options: { provider?: TtsProvider; voice?: string }): Promise<Recording> {
+  const settings = getSettings();
+  const provider = options.provider ?? settings.tts.provider;
+  if (provider === 'browser') throw new HttpError(400, 'Voices on this device are not stored: choose a voice service.');
+  const effective: AppSettings = { ...settings, tts: { ...settings.tts, provider } };
+  const base = voiceTarget(target, effective);
+  const voice = options.voice?.trim() ? { ...base, voice: options.voice.trim() } : provider !== settings.tts.provider ? { ...base, voice: '' } : base;
+  const clean = audioText(text);
+  if (!clean) throw new HttpError(400, 'Nothing to record');
+  const audio = await synthesize(clean, voice, effective);
+  const key = audio.key ?? voiceKey(effective, voice);
+  const now = Date.now();
+  voice.db.prepare(`INSERT OR REPLACE INTO audio (text, voice, mime, data, created_at) VALUES (?, ?, ?, ?, ?)`).run(clean, key, audio.mime, audio.data, now);
+  const row = voice.db.prepare(`SELECT id FROM audio WHERE text = ? AND voice = ?`).get(clean, key) as { id: number };
+  return { id: row.id, voice: key, createdAt: now };
+}
+
+// Speaks a text in any locale with the configured voice service (or another
+// one): example words of the pronunciation mode. null when voices are only
+// on the device.
+export async function speakInLocale(
+  text: string,
+  locale: string,
+  provider?: TtsProvider
+): Promise<{ data: Buffer; mime: string; voice: string } | null> {
+  const settings = getSettings();
+  const chosen = provider ?? settings.tts.provider;
+  if (chosen === 'browser') return null;
+  const effective: AppSettings = { ...settings, tts: { ...settings.tts, provider: chosen } };
+  const ownEnglishVoice = locale.toLowerCase() === 'en-us' && chosen === settings.tts.provider;
+  const target: VoiceTarget = { db: englishDatabase(), locale, voice: ownEnglishVoice ? settings.tts.englishVoice : '' };
+  const audio = await synthesize(text, target, effective);
+  return { data: audio.data, mime: audio.mime, voice: audio.key ?? voiceKey(effective, target) };
 }
 
 // Replaces every stored recording of a text with a new one. The old audio is

@@ -189,7 +189,18 @@ export default function Feedback({
             </button>
             <span lang={language.code}>{question.sentence.text}</span>
           </div>
-          {question.sentence.english && <div className="pair muted">{question.sentence.english}</div>}
+          {question.sentence.full && (
+            <div className="pair muted">
+              Part {question.sentence.part?.index} of {question.sentence.part?.count} of: <span lang={language.code}>{question.sentence.full}</span>
+            </div>
+          )}
+          {question.sentence.translations.length > 0 && !question.sentence.full && (
+            <div className="pair muted">
+              {question.sentence.translations.length > 1 ? 'Translations: ' : ''}
+              {question.sentence.translations.join(' · ')}
+            </div>
+          )}
+          {outcome.matched && question.answerSide === 'english' && <div className="muted">Closest translation: “{outcome.matched}”</div>}
           <SentenceWords questionKey={question.key} tokens={question.sentence.tokens} language={language} />
         </div>
       )}

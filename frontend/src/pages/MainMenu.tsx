@@ -1,5 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom';
-import { BarChart3, Settings, Sparkles } from 'lucide-react';
+import { AudioLines, BarChart3, Settings, Sparkles } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useApp } from '../state/AppContext';
 import { LanguageSelect } from '../components/Layout';
@@ -39,6 +39,9 @@ export default function MainMenu() {
           <Link className="button primary" to="/config/language">
             <Sparkles size={16} /> Add your first language
           </Link>
+          <p className="muted">
+            Or start with the <Link to="/pronunciation">pronunciation mode</Link>: the sounds of speech and their IPA symbols, no language needed.
+          </p>
         </div>
       </div>
     );
@@ -70,6 +73,13 @@ export default function MainMenu() {
                 ? `${progress.learnedWords.toLocaleString()} learned · ${progress.dueNow} due for review${progress.learn?.block ? ` · block ${progress.learn.block}, batch ${progress.learn.batch} (${PHASE_LABELS[progress.learn.phase!]})` : ''}`
                 : 'Guided learning and spaced repetition'}
             </span>
+          </div>
+        </Link>
+        <Link to="/pronunciation" className="menu-action">
+          <AudioLines size={28} />
+          <div>
+            <strong>Pronunciation (IPA)</strong>
+            <span className="muted">The sounds of speech and their symbols, for every language</span>
           </div>
         </Link>
       </div>

@@ -161,10 +161,38 @@
   margin-bottom: $space-sm;
 }
 
+// Text size of questions (A− / A+).
+.text-size {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: auto;
+
+  button {
+    padding: 0.05rem 0.4rem;
+    border: 1px solid var(--border);
+    border-radius: $radius-sm;
+    background: transparent;
+    color: var(--text-muted);
+    font: inherit;
+    font-size: 0.8rem;
+    cursor: pointer;
+
+    &:hover:not(:disabled) {
+      color: var(--text);
+      border-color: var(--primary);
+    }
+
+    &:disabled {
+      opacity: 0.4;
+      cursor: default;
+    }
+  }
+}
+
 // Exclude a sentence question, with a reason.
 .report-menu {
   position: relative;
-  margin-left: auto;
+  margin-left: $space-sm;
 
   > .link-button {
     color: var(--text-muted);
@@ -251,13 +279,13 @@
   }
 
   .prompt-text {
-    font-size: 3rem;
+    font-size: calc(3rem * var(--q-scale, 1));
     font-weight: 600;
     word-break: break-word;
   }
 
   &.sentence .prompt-text {
-    font-size: 1.6rem;
+    font-size: calc(1.6rem * var(--q-scale, 1));
     font-weight: 500;
     line-height: 1.4;
   }
@@ -292,6 +320,23 @@
   span {
     font-size: 0.85rem;
     color: var(--text-muted);
+  }
+}
+
+// Translate questions: the words not met yet, with their meaning.
+.prompt-hints {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  font-size: calc(0.95rem * var(--q-scale, 1));
+
+  .hint-chip {
+    padding: 0.15rem 0.55rem;
+    border-radius: 999px;
+    border: 1px dashed var(--border);
+    background: var(--surface-2);
   }
 }
 
@@ -340,7 +385,7 @@
   background: var(--surface);
   color: var(--text);
   font: inherit;
-  font-size: 1.5rem;
+  font-size: calc(1.5rem * var(--q-scale, 1));
   text-align: left;
   cursor: pointer;
   transition:
@@ -387,7 +432,7 @@
 .answer-input {
   width: 100%;
   padding: 0.8rem 1rem;
-  font-size: 2rem;
+  font-size: calc(2rem * var(--q-scale, 1));
   text-align: center;
   border-width: 2px;
   border-color: var(--side, var(--border));
@@ -399,7 +444,7 @@
   }
 
   &.sentence {
-    font-size: 1.3rem;
+    font-size: calc(1.3rem * var(--q-scale, 1));
     text-align: left;
   }
 
@@ -697,7 +742,7 @@
 
   .expected,
   .spelling {
-    font-size: 1.2rem;
+    font-size: calc(1.2rem * var(--q-scale, 1));
   }
 
   .note {
@@ -716,7 +761,7 @@
 
   .retype input {
     width: 100%;
-    font-size: 1.2rem;
+    font-size: calc(1.2rem * var(--q-scale, 1));
     border-width: 2px;
     border-color: var(--side, var(--border));
 
@@ -754,7 +799,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem;
-  font-size: 1.15rem;
+  font-size: calc(1.15rem * var(--q-scale, 1));
   padding: $space-sm 0;
 
   .exact {

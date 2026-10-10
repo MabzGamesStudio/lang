@@ -1,5 +1,5 @@
 import express, { type Request, type Response, type Router } from 'express';
-import { HttpError, languageDb } from '../db/connection.js';
+import { HttpError, englishDatabase, languageDb } from '../db/connection.js';
 import { maskedSettings, saveSettings, getSettings } from '../services/settings.js';
 import {
   createLanguage,
@@ -28,6 +28,7 @@ import {
   undefinedWordCount,
   listSentences,
   listWords,
+  recordingsOf,
   SENTENCE_EXCLUSIONS,
   setSentenceExclusion,
   resetWordProgress,
@@ -71,8 +72,29 @@ import {
   translateSentences,
   translationAvailable,
 } from '../providers/translation.js';
-import { getAudio, pregenerateAudio, regenerateSentenceAudio, transcribe, ttsGenerates } from '../providers/speech.js';
+import {
+  addRecording,
+  deleteRecording,
+  getAudio,
+  pregenerateAudio,
+  recordingFile,
+  regenerateSentenceAudio,
+  transcribe,
+  ttsGenerates,
+} from '../providers/speech.js';
 import { suggestImages } from '../providers/images.js';
+import {
+  addIpaRecording,
+  applyIpaResults,
+  deleteIpaRecording,
+  ipaAudio,
+  ipaRecordingFile,
+  ipaSummary,
+  nextIpaQuestion,
+  resetIpaProgress,
+  startIpaDownload,
+} from '../services/ipa.js';
+import { isIpaGameId, type IpaResult } from '../../../shared/ipa/games.js';
 import { chat, judgeTranslation, llmAvailable } from '../providers/llm.js';
 import { PHASES, isGameId, type GameId } from '../../../shared/games.js';
 import type { SentenceExclusion, TranslationProvider, TtsProvider, WordResult } from '../../../shared/types.js';
@@ -641,11 +663,118 @@ export function apiRouter(): Router {
     res.send(audio.data);
   });
 
+  // Recordings of a word or sentence: list, play one, delete one, add one.
+  const recordingTarget = (value: unknown): string => {
+    const target = str(value) || 'english';
+    if (target !== 'english') languageDb(target);
+    return target;
+  };
+
+  api.get('/recordings', (req, res) => {
+    const target = recordingTarget(req.query.lang);
+    res.json(recordingsOf(target === 'english' ? englishDatabase() : languageDb(target), str(req.query.text)));
+  });
+
+  api.get('/recordings/:target/:id', (req, res) => {
+    const audio = recordingFile(recordingTarget(req.params.target), intParam(req.params.id, 0));
+    if (!audio) throw new HttpError(404, 'Recording not found');
+    res.setHeader('Content-Type', audio.mime);
+    res.setHeader('Cache-Control', 'private, no-cache');
+    res.send(audio.data);
+  });
+
+  api.delete('/recordings/:target/:id', (req, res) => {
+    res.json({ deleted: deleteRecording(recordingTarget(req.params.target), intParam(req.params.id, 0)) });
+  });
+
+  api.post('/recordings', async (req, res) => {
+    const provider = str(req.body?.provider) as TtsProvider;
+    res.json(
+      await addRecording(recordingTarget(req.body?.lang), str(req.body?.text), {
+        provider: TTS_PROVIDERS.includes(provider) ? provider : undefined,
+        voice: str(req.body?.voice) || undefined,
+      })
+    );
+  });
+
   api.post('/stt', express.raw({ type: () => true, limit: '25mb' }), async (req, res) => {
     const target = str(req.query.lang) || 'english';
     if (!Buffer.isBuffer(req.body) || req.body.length === 0) throw new HttpError(400, 'No audio received');
     const text = await transcribe(req.body, str(req.headers['content-type']), target);
     res.json({ text });
+  });
+
+  // -------------------------------------------------------------------------
+  // Pronunciation mode (IPA sounds)
+
+  api.get('/ipa', (_req, res) => {
+    res.json(ipaSummary());
+  });
+
+  api.post('/ipa/download', (_req, res) => {
+    res.json(startIpaDownload());
+  });
+
+  api.get('/ipa/audio', async (req, res) => {
+    const kind = str(req.query.kind);
+    if (kind !== 'sound' && kind !== 'example' && kind !== 'word') throw new HttpError(400, 'Unknown kind of audio');
+    const audio = await ipaAudio({ kind, lang: str(req.query.lang), text: str(req.query.text) });
+    if (!audio) {
+      res.status(204).end();
+      return;
+    }
+    res.setHeader('Content-Type', audio.mime);
+    res.setHeader('Cache-Control', 'private, no-cache');
+    res.send(audio.data);
+  });
+
+  api.get('/ipa/recordings/:id', (req, res) => {
+    const audio = ipaRecordingFile(intParam(req.params.id, 0));
+    if (!audio) throw new HttpError(404, 'Recording not found');
+    res.setHeader('Content-Type', audio.mime);
+    res.setHeader('Cache-Control', 'private, no-cache');
+    res.send(audio.data);
+  });
+
+  api.delete('/ipa/recordings/:id', (req, res) => {
+    res.json({ deleted: deleteIpaRecording(intParam(req.params.id, 0)) });
+  });
+
+  api.post('/ipa/recordings', async (req, res) => {
+    const provider = str(req.body?.provider) as TtsProvider;
+    res.json(await addIpaRecording(str(req.body?.lang), str(req.body?.text), TTS_PROVIDERS.includes(provider) ? provider : undefined));
+  });
+
+  api.post('/ipa/next', (req, res) => {
+    const gameId: unknown = req.body?.gameId;
+    if (!isIpaGameId(gameId)) throw new HttpError(400, 'Unknown pronunciation game');
+    const recent: unknown[] = Array.isArray(req.body?.recent) ? req.body.recent : [];
+    res.json(
+      nextIpaQuestion({
+        gameId,
+        recent: recent.map(String).slice(0, 10),
+        sounds: req.body?.sounds === 'all' ? 'all' : 'english',
+        words: str(req.body?.words) || 'examples',
+      })
+    );
+  });
+
+  api.post('/ipa/results', (req, res) => {
+    const list: unknown[] = Array.isArray(req.body?.results) ? req.body.results : [];
+    const results = list.filter(
+      (item): item is IpaResult =>
+        typeof item === 'object' &&
+        item !== null &&
+        typeof (item as IpaResult).symbol === 'string' &&
+        PHASES.includes((item as IpaResult).phase) &&
+        typeof (item as IpaResult).correct === 'boolean'
+    );
+    res.json({ levels: applyIpaResults(results) });
+  });
+
+  api.post('/ipa/reset', (_req, res) => {
+    resetIpaProgress();
+    res.json({ ok: true });
   });
 
   // -------------------------------------------------------------------------

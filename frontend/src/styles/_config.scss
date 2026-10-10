@@ -193,3 +193,58 @@
     vertical-align: top;
   }
 }
+
+// Sources of meanings, translations and recordings.
+.gloss-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  margin: 0 6px 2px 0;
+
+  small {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 0 0.35rem;
+  }
+}
+
+.sourced + .sourced::before {
+  content: ' · ';
+}
+
+.sentence-details {
+  display: flex;
+  flex-direction: column;
+  gap: $space-xs;
+  margin-top: $space-xs;
+  padding: $space-sm;
+  border-radius: $radius-sm;
+  background: var(--surface-2);
+  font-size: 0.82rem;
+}
+
+.recordings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+
+  .recording,
+  .recording-add {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+  }
+
+  select {
+    padding: 0.1rem 0.3rem;
+    font-size: 0.8rem;
+  }
+}
+
+.icon-button.active {
+  color: var(--primary);
+  background: var(--surface-2);
+}

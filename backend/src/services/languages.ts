@@ -95,8 +95,8 @@ export function languageSummary(id: string): LanguageSummary {
     .get(now) as { wordCount: number; definedWordCount: number; learnedCount: number; dueCount: number };
   const sentences = db
     .prepare(
-      `SELECT COUNT(*) FILTER (WHERE excluded_reason IS NULL) AS sentenceCount,
-              COUNT(english) FILTER (WHERE excluded_reason IS NULL) AS translatedSentenceCount,
+      `SELECT COUNT(*) FILTER (WHERE excluded_reason IS NULL OR excluded_reason = 'audio') AS sentenceCount,
+              COUNT(english) FILTER (WHERE excluded_reason IS NULL OR excluded_reason = 'audio') AS translatedSentenceCount,
               COUNT(*) FILTER (WHERE excluded_reason IS NOT NULL) AS excludedSentenceCount
        FROM sentences`
     )

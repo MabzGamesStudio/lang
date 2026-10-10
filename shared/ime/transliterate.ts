@@ -10,6 +10,8 @@ export interface PhoneticScheme {
   post?: (text: string) => string;
   // Converter that cannot be expressed as simple rules (Devanagari).
   convert?: (raw: string) => string;
+  // Upper and lower case keys mean different letters (X-SAMPA: s → s, S → ʃ).
+  caseSensitive?: boolean;
 }
 
 const SEPARATOR = '|';
@@ -142,7 +144,23 @@ const DEVA_RULES: [string, string][] = [
   ...DEVA_MARKS,
 ];
 
+// X-SAMPA: IPA with ASCII letters (case matters: s → s, S → ʃ).
+const XSAMPA: [string, string][] = [
+  ['A', 'ɑ'], ['{', 'æ'], ['6', 'ɐ'], ['Q', 'ɒ'], ['E', 'ɛ'], ['@', 'ə'], ['3', 'ɜ'], ['I', 'ɪ'], ['O', 'ɔ'],
+  ['2', 'ø'], ['9', 'œ'], ['&', 'ɶ'], ['U', 'ʊ'], ['}', 'ʉ'], ['V', 'ʌ'], ['Y', 'ʏ'], ['1', 'ɨ'], ['M', 'ɯ'],
+  ['7', 'ɤ'], ['8', 'ɵ'], ['@`', 'ɚ'], ['3`', 'ɝ'], ['@\\', 'ɘ'], ['3\\', 'ɞ'],
+  ['B', 'β'], ['C', 'ç'], ['D', 'ð'], ['G', 'ɣ'], ['H', 'ɥ'], ['J', 'ɲ'], ['K', 'ɬ'], ['L', 'ʎ'], ['N', 'ŋ'],
+  ['P', 'ʋ'], ['R', 'ʁ'], ['S', 'ʃ'], ['T', 'θ'], ['W', 'ʍ'], ['X', 'χ'], ['Z', 'ʒ'], ['F', 'ɱ'], ['?', 'ʔ'],
+  ['4', 'ɾ'], ['5', 'ɫ'], ['g', 'ɡ'],
+  ['r\\', 'ɹ'], ['h\\', 'ɦ'], ['j\\', 'ʝ'], ['J\\', 'ɟ'], ['G\\', 'ɢ'], ['N\\', 'ɴ'], ['R\\', 'ʀ'],
+  ['B\\', 'ʙ'], ['?\\', 'ʕ'], ['X\\', 'ħ'], ['K\\', 'ɮ'], ['M\\', 'ɰ'], ['L\\', 'ʟ'], ['s\\', 'ɕ'],
+  ['z\\', 'ʑ'], ['p\\', 'ɸ'], ['x\\', 'ɧ'],
+  ['t`', 'ʈ'], ['d`', 'ɖ'], ['n`', 'ɳ'], ['s`', 'ʂ'], ['z`', 'ʐ'], ['l`', 'ɭ'], ['r`', 'ɽ'], ['r\\`', 'ɻ'],
+  [':', 'ː'], ['"', 'ˈ'], ['%', 'ˌ'], ['~', '\u0303'], ['=', '\u0329'], ['_h', 'ʰ'], ['_j', 'ʲ'], ['_w', 'ʷ'],
+];
+
 export const PHONETIC_SCHEMES: Record<string, PhoneticScheme> = {
+  ipa: { id: 'ipa', name: 'X-SAMPA', rules: XSAMPA, caseSensitive: true },
   ru: { id: 'ru', name: 'Russian', rules: RUSSIAN },
   be: { id: 'be', name: 'Russian-style', rules: RUSSIAN },
   uk: { id: 'uk', name: 'Ukrainian', rules: UKRAINIAN },
@@ -164,7 +182,8 @@ const compiled = new Map<string, { map: Map<string, string>; maxLength: number }
 function compile(scheme: PhoneticScheme) {
   let entry = compiled.get(scheme.id);
   if (!entry) {
-    const map = new Map(scheme.rules.map(([latin, output]) => [latin.toLowerCase(), output]));
+    const key = (latin: string) => (scheme.caseSensitive ? latin : latin.toLowerCase());
+    const map = new Map(scheme.rules.map(([latin, output]) => [key(latin), output]));
     entry = { map, maxLength: Math.max(1, ...scheme.rules.map(([latin]) => latin.length)) };
     compiled.set(scheme.id, entry);
   }
@@ -176,14 +195,14 @@ export function phoneticConsumes(scheme: PhoneticScheme, key: string): boolean {
   if (key === SEPARATOR) return true;
   if (scheme.convert) return /^[A-Za-z.~^|]$/.test(key);
   if (/^[a-zA-Z]$/.test(key)) return true;
-  const lower = key.toLowerCase();
-  return scheme.rules.some(([latin]) => latin.includes(lower));
+  const typed = scheme.caseSensitive ? key : key.toLowerCase();
+  return scheme.rules.some(([latin]) => latin.includes(typed));
 }
 
 export function transliterate(raw: string, scheme: PhoneticScheme): string {
   if (scheme.convert) return scheme.convert(raw);
   const { map, maxLength } = compile(scheme);
-  const lower = raw.toLowerCase();
+  const lower = scheme.caseSensitive ? raw : raw.toLowerCase();
   let out = '';
   let i = 0;
   while (i < raw.length) {

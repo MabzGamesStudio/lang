@@ -72,19 +72,26 @@ function serve(handler: (req: http.IncomingMessage, body: string, res: http.Serv
 
 const progress = { progress() {}, message() {}, checkCancelled() {}, cancelled: false };
 
-test('a version 1 language database gets the new sentence columns', () => {
+test('a version 1 language database is upgraded, keeping its translations and definitions', () => {
   createLanguage({ name: 'Spanish', id: 'old' } as never);
   closeLanguageDb('old');
+  // Back to the version 1 tables, with a translated sentence and a defined word.
   const raw = new Database(languageDbPath('old'));
   raw.exec(`DROP INDEX sentences_excluded;
     ALTER TABLE sentences DROP COLUMN excluded_reason;
     ALTER TABLE sentences DROP COLUMN excluded_at;
+    DROP TABLE sentence_translations;
+    ALTER TABLE words DROP COLUMN english_sources;
+    INSERT INTO words (word, display, english, definition_source) VALUES ('gato', 'gato', '["cat","tomcat"]', 'wiktionary');
+    INSERT INTO sentences (text, english, translation_source, word_count) VALUES ('El gato.', 'The cat.', 'deepl', 2);
     UPDATE meta SET value = '1' WHERE key = 'schema_version';`);
   raw.close();
   const db = languageDb('old');
   const columns = (db.prepare(`PRAGMA table_info(sentences)`).all() as { name: string }[]).map((column) => column.name);
   assert.ok(columns.includes('excluded_reason') && columns.includes('excluded_at'));
   assert.equal(Number((db.prepare(`SELECT value FROM meta WHERE key = 'schema_version'`).get() as { value: string }).value), LANGUAGE_SCHEMA_VERSION);
+  assert.deepEqual(db.prepare(`SELECT english, source FROM sentence_translations`).all(), [{ english: 'The cat.', source: 'deepl' }]);
+  assert.equal((db.prepare(`SELECT english_sources AS s FROM words WHERE word = 'gato'`).get() as { s: string }).s, '["wiktionary","wiktionary"]');
 });
 
 test('excluded sentences leave the questions and the counts, and come back', async () => {
@@ -241,8 +248,8 @@ test('reported audio is regenerated with Azure or ElevenLabs and replaces the ol
     assert.deepEqual(englishAudio, [{ voice: 'azure:en-US-TestNeural' }], 'the English recording is redone too');
     assert.equal((db.prepare(`SELECT excluded_reason AS r FROM sentences WHERE id = ?`).get(id) as { r: string | null }).r, null, 'back in use');
     const listed = listSentences('spanish', { offset: 0, limit: 50, q: 'Juan', filter: 'all' }).rows[0];
-    assert.equal(listed.audioVoice, 'azure:es-ES-TestNeural');
-    assert.equal(listed.englishAudioVoice, 'azure:en-US-TestNeural');
+    assert.deepEqual(listed.audio.map((recording) => recording.voice), ['azure:es-ES-TestNeural']);
+    assert.deepEqual(listed.englishAudio.map((recording) => recording.voice), ['azure:en-US-TestNeural']);
 
     // One sentence with ElevenLabs and a chosen voice; newer models are told the language.
     await regenerateSentenceAudio('spanish', { ids: [id], provider: 'elevenlabs', voice: 'VOICE2' }, progress);
@@ -266,4 +273,83 @@ test('reported audio is regenerated with Azure or ElevenLabs and replaces the ol
     mock.server.close();
     saveSettings({});
   }
+});
+
+test('sentences keep several translations, each with its source', async () => {
+  const { setSentenceTranslations, translationsOf } = await import('../backend/src/services/sentenceTranslations.js');
+  const { updateSentence } = await import('../backend/src/services/words.js');
+  const db = languageDb('spanish');
+  const id = sentenceId(db, 'El gato come pescado');
+  const list = () => (translationsOf(db, [id]).get(id) ?? []).map((t) => [t.english, t.source]);
+  saveSentenceTranslations(db, [{ id, english: 'The cat; eats fish.' }], 'deepl');
+  const main = (db.prepare(`SELECT english FROM sentences WHERE id = ?`).get(id) as { english: string }).english;
+  assert.ok(list().some(([english, source]) => english === 'The cat, eats fish.' && source === 'deepl'), 'semicolons never stay inside a translation');
+  assert.equal(main, list()[0][0], 'the first translation is the main one');
+
+  updateSentence('spanish', id, { english: `${list()[1][0]}; The cat is eating fish.` });
+  assert.deepEqual(list(), [
+    ['The cat, eats fish.', 'deepl'],
+    ['The cat is eating fish.', 'manual'],
+  ]);
+  assert.equal((db.prepare(`SELECT english, translation_source AS s FROM sentences WHERE id = ?`).get(id) as { english: string; s: string }).english, 'The cat, eats fish.');
+
+  // Every translation is an accepted answer of a translate question.
+  const config = getLanguageConfig(db);
+  const gato = loadLearners(db, `word = 'gato'`)[0];
+  let question = null;
+  for (let i = 0; i < 20 && question?.sentence?.id !== id; i++) {
+    question = buildQuestion(GAMES_BY_ID.foreignSentenceToEnglishTyped, gato, { db, langId: 'spanish', config, settings: getSettings(), frontier: 100, batchWords: [gato] });
+  }
+  assert.equal(question?.sentence?.id, id);
+  assert.deepEqual(question?.accepted?.map((a) => a.text), ['The cat, eats fish.', 'The cat is eating fish.']);
+  assert.deepEqual(question?.sentence?.translations, ['The cat, eats fish.', 'The cat is eating fish.']);
+  setSentenceTranslations(db, id, ['EN El gato come pescado.']);
+});
+
+test('meanings of a word keep their sources; edits keep them too', async () => {
+  const { saveDefinitions, updateWord, getWord } = await import('../backend/src/services/words.js');
+  const db = languageDb('spanish');
+  const gato = wordId(db, 'gato');
+  const word = () => getWord('spanish', gato);
+  assert.deepEqual([word().english, word().englishSources], [['cat'], ['word list: words']]);
+  saveDefinitions(db, [{ id: gato, english: ['cat', 'tomcat'], source: 'wiktionary' }], false);
+  assert.deepEqual([word().english, word().englishSources], [['cat', 'tomcat'], ['word list: words', 'wiktionary']], 'new meanings are added');
+  updateWord('spanish', gato, { english: ['tomcat', 'kitty'] });
+  assert.deepEqual([word().english, word().englishSources], [['tomcat', 'kitty'], ['wiktionary', 'manual']]);
+  saveDefinitions(db, [{ id: gato, english: ['cat'], source: 'llm:test' }], true);
+  assert.deepEqual([word().english, word().englishSources], [['kitty', 'cat'], ['manual', 'llm:test']], 'fetching again keeps typed meanings');
+  assert.ok(word().origins?.some((origin) => origin.title === 'text'), 'books the word comes from');
+});
+
+test('recite questions ask long sentences in parts; translate questions give unseen words', () => {
+  const db = languageDb('spanish');
+  const config = getLanguageConfig(db);
+  const perro = loadLearners(db, `word = 'perro'`)[0];
+  const settings = { ...getSettings(), learning: { ...getSettings().learning, reciteMaxWords: 3 } };
+  const ctx = { db, langId: 'spanish', config, settings, frontier: 3, batchWords: [perro] };
+  const recite = buildQuestion(GAMES_BY_ID.foreignSentenceToForeignTyped, perro, ctx);
+  // "El perro come carne en la casa." (7 words, at most 3) → 3 + 2 + 2.
+  assert.equal(recite?.sentence?.text, 'El perro come');
+  assert.deepEqual(recite?.sentence?.part, { index: 1, count: 3 });
+  assert.equal(recite?.sentence?.full, 'El perro come carne en la casa.');
+  assert.equal(recite?.answer, 'El perro come');
+  assert.equal(recite?.sentence?.tokens.length, 3);
+
+  const translate = buildQuestion(GAMES_BY_ID.foreignSentenceToEnglishTyped, perro, ctx);
+  assert.equal(translate?.sentence?.text, 'El perro come carne en la casa.', 'translate questions use whole sentences');
+  const hints = translate?.hints?.map((hint) => hint.text) ?? [];
+  assert.ok(hints.includes('carne') && hints.includes('casa'), `unseen words are given: ${hints.join(', ')}`);
+  assert.ok(!hints.includes('perro'), 'not the word asked about');
+  assert.deepEqual(translate?.hints?.find((hint) => hint.text === 'carne')?.english, ['meat']);
+});
+
+test('bad audio only keeps a sentence out of listening questions', () => {
+  const db = languageDb('spanish');
+  const perro = wordId(db, 'perro');
+  const only = sentenceId(db, 'El perro come carne');
+  setSentenceExclusion('spanish', only, 'audio');
+  assert.equal(pickSentence(db, perro, true, 100, false)?.id, only, 'still read and typed');
+  assert.equal(pickSentence(db, perro, true, 100, true), null, 'never listened to');
+  assert.equal((db.prepare(`SELECT sentence_count AS n FROM words WHERE id = ?`).get(perro) as { n: number }).n, 1);
+  setSentenceExclusion('spanish', only, null);
 });

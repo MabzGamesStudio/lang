@@ -9,6 +9,14 @@ export const EXCLUSION_LABELS: Record<SentenceExclusion, string> = {
   other: 'Other problem',
 };
 
+// What an exclusion does.
+export const EXCLUSION_EFFECTS: Record<SentenceExclusion, string> = {
+  translation: 'left out of the questions',
+  nonsense: 'left out of the questions',
+  audio: 'left out of listening questions only',
+  other: 'left out of the questions',
+};
+
 // Takes the sentence of a question out of the question set, with a reason.
 export default function ReportMenu({ onReport, disabled = false }: { onReport: (reason: SentenceExclusion) => void; disabled?: boolean }) {
   const [open, setOpen] = useState(false);
@@ -47,12 +55,14 @@ export default function ReportMenu({ onReport, disabled = false }: { onReport: (
               key={reason}
               type="button"
               role="menuitem"
+              title={`The sentence is ${EXCLUSION_EFFECTS[reason]}`}
               onClick={() => {
                 setOpen(false);
                 onReport(reason);
               }}
             >
               {EXCLUSION_LABELS[reason]}
+              {reason === 'audio' && <span className="muted"> (listening only)</span>}
             </button>
           ))}
         </div>

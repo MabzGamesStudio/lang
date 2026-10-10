@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3';
 
-export const LANGUAGE_SCHEMA_VERSION = 2;
-export const ENGLISH_SCHEMA_VERSION = 1;
+export const LANGUAGE_SCHEMA_VERSION = 3;
+export const ENGLISH_SCHEMA_VERSION = 2;
 
 const LANGUAGE_SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (
@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS words (
   user_excluded INTEGER,
   active INTEGER NOT NULL DEFAULT 1,
   english TEXT,
+  english_sources TEXT,
   pronunciation TEXT,
   pos TEXT,
   definition_source TEXT,
@@ -88,6 +89,17 @@ CREATE TABLE IF NOT EXISTS sentences (
 CREATE INDEX IF NOT EXISTS sentences_max_rank ON sentences(max_rank);
 CREATE INDEX IF NOT EXISTS sentences_excluded ON sentences(excluded_reason) WHERE excluded_reason IS NOT NULL;
 CREATE INDEX IF NOT EXISTS sentences_source ON sentences(source_id);
+
+CREATE TABLE IF NOT EXISTS sentence_translations (
+  id INTEGER PRIMARY KEY,
+  sentence_id INTEGER NOT NULL REFERENCES sentences(id) ON DELETE CASCADE,
+  english TEXT NOT NULL,
+  source TEXT NOT NULL,
+  position INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  UNIQUE (sentence_id, english)
+);
+CREATE INDEX IF NOT EXISTS sentence_translations_sentence ON sentence_translations(sentence_id, position);
 
 CREATE TABLE IF NOT EXISTS sentence_words (
   sentence_id INTEGER NOT NULL REFERENCES sentences(id) ON DELETE CASCADE,
@@ -157,6 +169,31 @@ CREATE TABLE IF NOT EXISTS audio (
   created_at INTEGER NOT NULL,
   UNIQUE (text, voice)
 );
+
+CREATE TABLE IF NOT EXISTS ipa_audio (
+  id INTEGER PRIMARY KEY,
+  lang TEXT NOT NULL,
+  text TEXT NOT NULL,
+  source TEXT NOT NULL,
+  mime TEXT NOT NULL,
+  data BLOB NOT NULL,
+  license TEXT,
+  author TEXT,
+  url TEXT,
+  created_at INTEGER NOT NULL,
+  UNIQUE (lang, text, source)
+);
+
+CREATE TABLE IF NOT EXISTS ipa_progress (
+  symbol TEXT PRIMARY KEY,
+  recognition_level INTEGER NOT NULL DEFAULT 0,
+  recall_level INTEGER NOT NULL DEFAULT 0,
+  recite_level INTEGER NOT NULL DEFAULT 0,
+  translate_level INTEGER NOT NULL DEFAULT 0,
+  correct INTEGER NOT NULL DEFAULT 0,
+  wrong INTEGER NOT NULL DEFAULT 0,
+  last_seen_at INTEGER
+);
 `;
 
 function schemaVersion(db: Database.Database): number {
@@ -170,23 +207,68 @@ function schemaVersion(db: Database.Database): number {
   return row ? Number(row.value) : 0;
 }
 
+// English database versions: 2 adds the pronunciation mode, recordings of
+// sounds and example words (ipa_audio: lang "ipa" for a sound on its own,
+// source "commons:<file>" or a voice key) and progress per sound
+// (ipa_progress). Only new tables, so no upgrade steps are needed.
+
 // Changes to tables of existing databases, by the schema version they lead to.
 // New databases get the columns from the CREATE TABLE statements directly.
 // 2: sentences.excluded_reason ('translation', 'nonsense', 'audio' or 'other')
 //    takes a sentence out of the questions; excluded_at says when.
-const LANGUAGE_UPGRADES: Record<number, string> = {
+// 3: several translations per sentence, each with its source
+//    (sentence_translations; sentences.english stays the main one), and the
+//    source of each English meaning of a word (words.english_sources).
+type Upgrade = string | ((db: Database.Database) => void);
+
+const LANGUAGE_UPGRADES: Record<number, Upgrade> = {
   2: `ALTER TABLE sentences ADD COLUMN excluded_reason TEXT;
       ALTER TABLE sentences ADD COLUMN excluded_at INTEGER;`,
+  3: (db) => {
+    db.exec(`ALTER TABLE words ADD COLUMN english_sources TEXT;
+      CREATE TABLE IF NOT EXISTS sentence_translations (
+        id INTEGER PRIMARY KEY,
+        sentence_id INTEGER NOT NULL REFERENCES sentences(id) ON DELETE CASCADE,
+        english TEXT NOT NULL,
+        source TEXT NOT NULL,
+        position INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        UNIQUE (sentence_id, english)
+      );
+      INSERT OR IGNORE INTO sentence_translations (sentence_id, english, source, position, created_at)
+        SELECT id, english, COALESCE(translation_source, 'unknown'), 0, 0 FROM sentences WHERE english IS NOT NULL;`);
+    // Every existing meaning gets the word's old definition source.
+    const update = db.prepare(`UPDATE words SET english_sources = ? WHERE id = ?`);
+    const rows = db.prepare(`SELECT id, english, definition_source AS source FROM words WHERE english IS NOT NULL`).all() as {
+      id: number;
+      english: string;
+      source: string | null;
+    }[];
+    for (const row of rows) {
+      let count = 1;
+      try {
+        const value: unknown = JSON.parse(row.english);
+        count = Array.isArray(value) ? value.length : 1;
+      } catch {
+        count = 1;
+      }
+      update.run(JSON.stringify(new Array(count).fill(row.source ?? 'unknown')), row.id);
+    }
+  },
 };
 
-function migrate(db: Database.Database, schema: string, kind: string, version: number, upgrades: Record<number, string> = {}): void {
+function migrate(db: Database.Database, schema: string, kind: string, version: number, upgrades: Record<number, Upgrade> = {}): void {
   const current = schemaVersion(db);
   if (current > version) {
     throw new Error(`This ${kind} database was created by a newer version of the app (schema ${current}).`);
   }
   db.transaction(() => {
     if (current > 0) {
-      for (let step = current + 1; step <= version; step++) if (upgrades[step]) db.exec(upgrades[step]);
+      for (let step = current + 1; step <= version; step++) {
+        const upgrade = upgrades[step];
+        if (typeof upgrade === 'string') db.exec(upgrade);
+        else upgrade?.(db);
+      }
     }
     db.exec(schema);
     db.prepare(`INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', ?)`).run(String(version));

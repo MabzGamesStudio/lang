@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { Loader2 } from 'lucide-react';
 import { api, errorMessage } from '../../api';
 import { useApp } from '../../state/AppContext';
@@ -9,7 +9,7 @@ import PromptView, { voiceFor } from './PromptView';
 import { ChoiceAnswer, SpokenAnswer, TypedAnswer } from './Answers';
 import Feedback from './Feedback';
 import BatchPreview from './BatchPreview';
-import ReportMenu, { EXCLUSION_LABELS } from './ReportMenu';
+import ReportMenu, { EXCLUSION_EFFECTS, EXCLUSION_LABELS } from './ReportMenu';
 import WordEditor, { type EditableWord } from '../WordEditor';
 import { GAMES_BY_ID, PHASE_LABELS, type GameId } from '../../../../shared/games';
 import type { AppSettings, LanguageSummary, NextResponse, Notice, Question, ResultsResponse, SentenceExclusion } from '../../../../shared/types';
@@ -50,7 +50,7 @@ export default function MinigameRunner({
   renderNotice,
   paused = false,
 }: RunnerProps) {
-  const { notify } = useApp();
+  const { notify, saveSettings } = useApp();
   const [stage, setStage] = useState<Stage>('loading');
   const [response, setResponse] = useState<NextResponse | null>(null);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
@@ -172,7 +172,7 @@ export default function MinigameRunner({
       try {
         const result = await api.excludeSentence(language.id, question.sentence.id, reason, undoId);
         notify(
-          `Sentence excluded (${EXCLUSION_LABELS[reason].toLowerCase()}).${result.undone ? ' Your answer to it does not count.' : ''} Fix it in Configuration → Sentences.`,
+          `${EXCLUSION_LABELS[reason]}: the sentence is ${EXCLUSION_EFFECTS[reason]}.${result.undone ? ' Your answer to it does not count.' : ''} Fix it in Configuration → Sentences.`,
           'success'
         );
       } catch (err) {
@@ -251,6 +251,9 @@ export default function MinigameRunner({
 
   const game = GAMES_BY_ID[question.gameId];
   const answering = stage === 'answering';
+  const textScale = settings.learning.questionTextScale || 100;
+  const resize = (step: number) =>
+    void saveSettings({ ...settings, learning: { ...settings.learning, questionTextScale: Math.max(70, Math.min(200, textScale + step)) } });
   const waitingForMemorize = question.prompt.memorize && !revealed;
   const answerProps = {
     question,
@@ -262,7 +265,7 @@ export default function MinigameRunner({
   };
 
   return (
-    <div className={`runner stage-${stage}`}>
+    <div className={`runner stage-${stage}`} style={{ '--q-scale': textScale / 100 } as CSSProperties}>
       {response.notice && response.notice.kind === 'missingDefinitions' && renderNotice && (
         <div className="inline-notice">{renderNotice(response.notice, () => void load(), true)}</div>
       )}
@@ -270,6 +273,14 @@ export default function MinigameRunner({
         <span className={`phase-tag phase-${question.phase}`}>{PHASE_LABELS[question.phase]}</span>
         <span>{game.title}</span>
         {stage === 'loading' && <Loader2 size={16} className="spin" />}
+        <span className="text-size">
+          <button type="button" title="Smaller text" onClick={() => resize(-10)} disabled={textScale <= 70}>
+            A−
+          </button>
+          <button type="button" title="Larger text" onClick={() => resize(10)} disabled={textScale >= 200}>
+            A+
+          </button>
+        </span>
         {question.sentence && <ReportMenu onReport={(reason) => void report(reason)} disabled={stage !== 'answering' && stage !== 'feedback'} />}
       </div>
       <PromptView

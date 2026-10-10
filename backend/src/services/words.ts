@@ -6,10 +6,12 @@ import { invalidateGlossIndex } from './glossIndex.js';
 import { fillChinesePinyin, isChinese } from './chinese.js';
 import { getLanguageConfig } from './languages.js';
 import { parseEnglish } from './util.js';
+import { readGlosses, sourcedGlosses, storeGlosses } from './glosses.js';
+import { addSentenceTranslations, setSentenceTranslations, splitTranslations, translationsOf } from './sentenceTranslations.js';
 
 export { parseEnglish };
 import { dedupe, stripParentheticals } from '../../../shared/text.js';
-import type { Paged, SentenceExclusion, SentenceRow, WordLevels, WordRow } from '../../../shared/types.js';
+import type { Paged, Recording, SentenceExclusion, SentenceRow, WordLevels, WordRow } from '../../../shared/types.js';
 
 export interface WordDbRow {
   id: number;
@@ -19,6 +21,7 @@ export interface WordDbRow {
   count: number;
   score: number;
   english: string | null;
+  english_sources: string | null;
   pronunciation: string | null;
   pos: string | null;
   definition_source: string | null;
@@ -38,7 +41,7 @@ export interface WordDbRow {
   last_seen_at: number | null;
 }
 
-export const WORD_COLUMNS = `id, word, display, rank, count, score, english, pronunciation, pos, definition_source,
+export const WORD_COLUMNS = `id, word, display, rank, count, score, english, english_sources, pronunciation, pos, definition_source,
   active, proper_noun, user_excluded, sentence_count, translated_sentence_count,
   recognition_level, recall_level, recite_level, translate_level,
   srs_stage, next_review_at, review_started_at, review_errors, last_seen_at`;
@@ -53,6 +56,7 @@ export function levelsOf(row: WordDbRow): WordLevels {
 }
 
 export function toWordRow(row: WordDbRow): WordRow {
+  const glosses = sourcedGlosses(row.english, row.english_sources, row.definition_source);
   return {
     id: row.id,
     word: row.word,
@@ -60,7 +64,8 @@ export function toWordRow(row: WordDbRow): WordRow {
     rank: row.rank,
     count: row.count,
     score: row.score,
-    english: parseEnglish(row.english),
+    english: glosses.map((gloss) => gloss.text),
+    englishSources: glosses.map((gloss) => gloss.source),
     pronunciation: row.pronunciation,
     pos: row.pos,
     definitionSource: row.definition_source,
@@ -133,11 +138,23 @@ export function listWords(langId: string, query: WordQuery): Paged<WordRow> {
   const rows = db
     .prepare(`SELECT ${WORD_COLUMNS} FROM words ${clause} ORDER BY ${order} LIMIT ? OFFSET ?`)
     .all(...params, query.limit, query.offset) as WordDbRow[];
-  return { rows: rows.map(toWordRow), total };
+  return { rows: rows.map((row) => withDetails(db, toWordRow(row))), total };
+}
+
+// Where a word was found (books, word lists) and its stored recordings.
+function withDetails(db: DB, word: WordRow): WordRow {
+  const origins = db
+    .prepare(
+      `SELECT s.title, ws.count FROM word_sources ws JOIN sources s ON s.id = ws.source_id
+       WHERE ws.word_id = ? ORDER BY ws.count DESC LIMIT 5`
+    )
+    .all(word.id) as { title: string; count: number }[];
+  return { ...word, origins, audio: recordingsOf(db, word.display) };
 }
 
 export function getWord(langId: string, id: number): WordRow {
-  return toWordRow(getWordDb(languageDb(langId), id));
+  const db = languageDb(langId);
+  return withDetails(db, toWordRow(getWordDb(db, id)));
 }
 
 export interface DefinitionUpdate {
@@ -148,30 +165,30 @@ export interface DefinitionUpdate {
   source: string;
 }
 
-// Saves definitions fetched from a provider. Existing values are kept unless
-// `overwrite` is set (manual edits are never lost by automation).
+// Saves definitions fetched from a provider. New meanings are added to the
+// ones a word already has, each with its source. With `overwrite`, meanings
+// found by automation before are replaced (typed ones are never lost), and so
+// are the pronunciation and part of speech.
 export function saveDefinitions(db: DB, updates: DefinitionUpdate[], overwrite: boolean): number {
   let saved = 0;
   const glosses: string[] = [];
-  const statement = overwrite
-    ? db.prepare(
-        `UPDATE words SET english = ?, pronunciation = COALESCE(?, pronunciation), pos = COALESCE(?, pos), definition_source = ? WHERE id = ?`
-      )
-    : db.prepare(
-        `UPDATE words SET english = COALESCE(english, ?), pronunciation = COALESCE(pronunciation, ?),
-           pos = COALESCE(pos, ?), definition_source = COALESCE(definition_source, ?) WHERE id = ?`
-      );
+  const other = overwrite
+    ? db.prepare(`UPDATE words SET pronunciation = COALESCE(?, pronunciation), pos = COALESCE(?, pos) WHERE id = ?`)
+    : db.prepare(`UPDATE words SET pronunciation = COALESCE(pronunciation, ?), pos = COALESCE(pos, ?) WHERE id = ?`);
   db.transaction(() => {
     for (const update of updates) {
       const english = dedupe(update.english.map((gloss) => gloss.trim()).filter(Boolean)).slice(0, 8);
       if (english.length === 0 && !update.pronunciation) continue;
-      statement.run(
-        english.length ? JSON.stringify(english) : null,
-        update.pronunciation?.trim() || null,
-        update.pos?.trim() || null,
-        update.source,
-        update.id
-      );
+      if (english.length) {
+        const current = readGlosses(db, update.id);
+        const incoming = english.map((text) => ({ text, source: update.source }));
+        storeGlosses(
+          db,
+          update.id,
+          overwrite ? [...current.filter((gloss) => gloss.source === 'manual'), ...incoming] : [...current, ...incoming]
+        );
+      }
+      other.run(update.pronunciation?.trim() || null, update.pos?.trim() || null, update.id);
       glosses.push(...english);
       saved++;
     }
@@ -210,10 +227,12 @@ export function updateWord(
   getWordDb(db, id);
   if (patch.english !== undefined) {
     const english = dedupe(patch.english.map((gloss) => gloss.trim()).filter(Boolean));
-    db.prepare(`UPDATE words SET english = ?, definition_source = ? WHERE id = ?`).run(
-      english.length ? JSON.stringify(english) : null,
-      english.length ? 'manual' : null,
-      id
+    // Meanings that stay keep their source; new ones were typed by the learner.
+    const current = readGlosses(db, id);
+    storeGlosses(
+      db,
+      id,
+      english.map((text) => ({ text, source: current.find((gloss) => gloss.text === text)?.source ?? 'manual' }))
     );
     registerEnglishWords(english);
     invalidateGlossIndex();
@@ -248,13 +267,11 @@ export function audioText(text: string): string {
   return stripParentheticals(text).slice(0, 500);
 }
 
-// The newest stored audio of a text: where it came from and when.
-function storedAudio(db: DB, text: string): { voice: string; createdAt: number } | null {
-  return (
-    (db
-      .prepare(`SELECT voice, created_at AS createdAt FROM audio WHERE text = ? ORDER BY created_at DESC LIMIT 1`)
-      .get(audioText(text)) as { voice: string; createdAt: number } | undefined) ?? null
-  );
+// The stored recordings of a text (several voices are possible), newest first.
+export function recordingsOf(db: DB, text: string): Recording[] {
+  return db
+    .prepare(`SELECT id, voice, created_at AS createdAt FROM audio WHERE text = ? ORDER BY created_at DESC`)
+    .all(audioText(text)) as Recording[];
 }
 
 export function listSentences(
@@ -264,42 +281,44 @@ export function listSentences(
   const db = languageDb(langId);
   const where: string[] = [];
   const params: unknown[] = [];
-  if (query.filter === 'untranslated') where.push('english IS NULL AND excluded_reason IS NULL');
-  if (query.filter === 'translated') where.push('english IS NOT NULL AND excluded_reason IS NULL');
-  if (query.filter === 'excluded') where.push('excluded_reason IS NOT NULL');
+  if (query.filter === 'untranslated') where.push('s.english IS NULL AND s.excluded_reason IS NULL');
+  if (query.filter === 'translated') where.push('s.english IS NOT NULL AND s.excluded_reason IS NULL');
+  if (query.filter === 'excluded') where.push('s.excluded_reason IS NOT NULL');
   if ((SENTENCE_EXCLUSIONS as string[]).includes(query.filter)) {
-    where.push('excluded_reason = ?');
+    where.push('s.excluded_reason = ?');
     params.push(query.filter);
   }
   if (query.q.trim()) {
-    where.push('(text LIKE ? OR english LIKE ?)');
+    where.push('(s.text LIKE ? OR s.id IN (SELECT sentence_id FROM sentence_translations WHERE english LIKE ?))');
     params.push(`%${query.q.trim()}%`, `%${query.q.trim()}%`);
   }
   if (query.wordId) {
-    where.push('id IN (SELECT sentence_id FROM sentence_words WHERE word_id = ?)');
+    where.push('s.id IN (SELECT sentence_id FROM sentence_words WHERE word_id = ?)');
     params.push(query.wordId);
   }
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
-  const total = (db.prepare(`SELECT COUNT(*) AS n FROM sentences ${clause}`).get(...params) as { n: number }).n;
-  const order = query.filter === 'excluded' ? 'excluded_at DESC' : 'max_rank IS NULL, max_rank, word_count';
+  const total = (db.prepare(`SELECT COUNT(*) AS n FROM sentences s ${clause}`).get(...params) as { n: number }).n;
+  const order = query.filter === 'excluded' ? 's.excluded_at DESC' : 's.max_rank IS NULL, s.max_rank, s.word_count';
   const rows = db
     .prepare(
-      `SELECT id, text, english, translation_source AS translationSource, source_id AS sourceId,
-              word_count AS wordCount, max_rank AS maxRank, excluded_reason AS excludedReason, excluded_at AS excludedAt
-       FROM sentences ${clause} ORDER BY ${order} LIMIT ? OFFSET ?`
+      `SELECT s.id, s.text, s.english, s.translation_source AS translationSource, s.source_id AS sourceId, src.title AS sourceTitle,
+              s.word_count AS wordCount, s.max_rank AS maxRank, s.excluded_reason AS excludedReason, s.excluded_at AS excludedAt
+       FROM sentences s LEFT JOIN sources src ON src.id = s.source_id
+       ${clause} ORDER BY ${order} LIMIT ? OFFSET ?`
     )
-    .all(...params, query.limit, query.offset) as Omit<SentenceRow, 'audioVoice' | 'audioAt' | 'englishAudioVoice'>[];
+    .all(...params, query.limit, query.offset) as Omit<SentenceRow, 'translations' | 'audio' | 'englishAudio'>[];
   const english = englishDatabase();
+  const translations = translationsOf(
+    db,
+    rows.map((row) => row.id)
+  );
   return {
-    rows: rows.map((row) => {
-      const audio = storedAudio(db, row.text);
-      return {
-        ...row,
-        audioVoice: audio?.voice ?? null,
-        audioAt: audio?.createdAt ?? null,
-        englishAudioVoice: row.english ? storedAudio(english, row.english)?.voice ?? null : null,
-      };
-    }),
+    rows: rows.map((row) => ({
+      ...row,
+      translations: translations.get(row.id) ?? [],
+      audio: recordingsOf(db, row.text),
+      englishAudio: row.english ? recordingsOf(english, row.english) : [],
+    })),
     total,
   };
 }
@@ -314,28 +333,16 @@ export function setSentenceExclusion(langId: string, id: number, reason: Sentenc
   refreshSentenceCounts(db, wordIdsOfSentences(db, [id]));
 }
 
+// Adds translations from a service or an import (see sentenceTranslations.ts).
 export function saveSentenceTranslations(db: DB, translations: { id: number; english: string }[], source: string): number {
-  const update = db.prepare(`UPDATE sentences SET english = ?, translation_source = ? WHERE id = ?`);
-  let saved = 0;
-  db.transaction(() => {
-    for (const translation of translations) {
-      const english = translation.english.replace(/\s+/g, ' ').trim();
-      if (!english) continue;
-      update.run(english, source, translation.id);
-      saved++;
-    }
-  })();
-  refreshSentenceCounts(db, wordIdsOfSentences(db, translations.map((t) => t.id)));
-  return saved;
+  return addSentenceTranslations(db, translations, source);
 }
 
+// Translations edited by hand: several separated by semicolons.
 export function updateSentence(langId: string, id: number, patch: { english: string | null }): void {
   const db = languageDb(langId);
-  db.prepare(`UPDATE sentences SET english = ?, translation_source = 'manual' WHERE id = ?`).run(
-    patch.english?.trim() || null,
-    id
-  );
-  refreshSentenceCounts(db, wordIdsOfSentences(db, [id]));
+  if (!db.prepare(`SELECT 1 FROM sentences WHERE id = ?`).get(id)) throw new HttpError(404, 'Sentence not found');
+  setSentenceTranslations(db, id, splitTranslations(patch.english ?? ''));
 }
 
 export function deleteSentence(langId: string, id: number): void {

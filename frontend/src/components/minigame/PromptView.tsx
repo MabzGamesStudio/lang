@@ -75,7 +75,10 @@ export default function PromptView({
 
   return (
     <div className={`prompt prompt-${prompt.mode} side-${prompt.side} ${question.sentence ? 'sentence' : 'word'}`}>
-      <div className="prompt-kind">{isForeign ? language.name : 'English'}</div>
+      <div className="prompt-kind">
+        {isForeign ? language.name : 'English'}
+        {question.sentence?.part && ` · part ${question.sentence.part.index} of ${question.sentence.part.count}`}
+      </div>
       {prompt.mode === 'text' &&
         (prompt.memorize && revealed ? (
           <div className="memorize-hidden">
@@ -96,6 +99,16 @@ export default function PromptView({
           <Volume2 size={40} />
           <span>{playing ? 'Playing…' : `Play again (${plainSpace ? 'Space' : 'Ctrl+Space'})`}</span>
         </button>
+      )}
+      {question.hints && question.hints.length > 0 && (
+        <div className="prompt-hints" title="Words of this sentence you have not met yet: they are not scored">
+          <span className="muted">New words:</span>
+          {question.hints.map((hint) => (
+            <span key={hint.text} className="hint-chip">
+              <span lang={language.code}>{hint.text}</span> = {hint.english.slice(0, 2).join(', ') || '?'}
+            </span>
+          ))}
+        </div>
       )}
       {prompt.mode === 'image' && prompt.imageId && (
         <div className="prompt-image">

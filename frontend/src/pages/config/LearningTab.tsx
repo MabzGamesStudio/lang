@@ -149,6 +149,18 @@ export default function LearningTab() {
           <Field label="Break minutes">
             <NumberInput value={learning.pomodoroBreakMinutes} min={1} max={60} onChange={(value) => update((s) => void (s.learning.pomodoroBreakMinutes = value))} />
           </Field>
+          <Field label="Text size of questions (%)" hint="Also with A− / A+ next to each question">
+            <NumberInput
+              value={learning.questionTextScale}
+              min={70}
+              max={200}
+              step={10}
+              onChange={(value) => update((s) => void (s.learning.questionTextScale = value))}
+            />
+          </Field>
+          <Field label="Recite: at most … words per part" hint="Longer sentences are recited in parts (0 = whole sentences)">
+            <NumberInput value={learning.reciteMaxWords} min={0} max={40} onChange={(value) => update((s) => void (s.learning.reciteMaxWords = value))} />
+          </Field>
         </div>
         <div className="stack">
           <Toggle checked={learning.playAudioOnFeedback} onChange={(value) => update((s) => void (s.learning.playAudioOnFeedback = value))}>

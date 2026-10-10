@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Languages, RefreshCw, Trash2, Volume2 } from 'lucide-react';
+import { Languages, Mic, RefreshCw, Trash2, Volume2 } from 'lucide-react';
 import { api } from '../../api';
 import { useAction, useApp } from '../../state/AppContext';
 import { useDebounced } from '../../lib/hooks';
@@ -8,28 +8,45 @@ import { TRANSLATION_SERVICES, VOICE_SERVICES, translationSourceLabel, voiceLabe
 import { EXCLUSION_LABELS } from '../../components/minigame/ReportMenu';
 import { voiceFor } from '../../components/minigame/PromptView';
 import JobsPanel from '../../components/JobsPanel';
+import Recordings from '../../components/Recordings';
 import { Pager } from './WordsTab';
 import { Field, Section, TextInput } from './fields';
 import type { LanguageSummary, Paged, SentenceExclusion, SentenceRow, TranslationProvider, TtsProvider } from '../../../../shared/types';
 
 const REASONS = Object.keys(EXCLUSION_LABELS) as SentenceExclusion[];
 
-function TranslationCell({ langId, sentence, onSaved }: { langId: string; sentence: SentenceRow; onSaved: (english: string | null) => void }) {
+// All translations of a sentence, separated by semicolons (the first is the
+// main one). Each keeps its source; new or edited ones are "typed by you".
+function TranslationCell({ langId, sentence, onSaved }: { langId: string; sentence: SentenceRow; onSaved: () => void }) {
   const run = useAction();
-  const [value, setValue] = useState(sentence.english ?? '');
-  useEffect(() => setValue(sentence.english ?? ''), [sentence.english]);
+  const joined = sentence.translations.map((translation) => translation.english).join('; ');
+  const [value, setValue] = useState(joined);
+  useEffect(() => setValue(joined), [joined]);
   return (
-    <textarea
-      rows={1}
-      value={value}
-      placeholder="Add a translation"
-      onChange={(event) => setValue(event.target.value)}
-      onBlur={async () => {
-        if ((sentence.english ?? '') === value.trim()) return;
-        const ok = await run(() => api.updateSentence(langId, sentence.id, value.trim() || null));
-        if (ok) onSaved(value.trim() || null);
-      }}
-    />
+    <>
+      <textarea
+        rows={1}
+        value={value}
+        placeholder="Add a translation (several: separate them with ;)"
+        title="Several translations: separate them with semicolons. The first one is shown in questions."
+        onChange={(event) => setValue(event.target.value)}
+        onBlur={async () => {
+          if (joined === value.trim()) return;
+          const ok = await run(() => api.updateSentence(langId, sentence.id, value.trim() || null));
+          if (ok) onSaved();
+        }}
+      />
+      {sentence.translations.length > 0 && (
+        <div className="origin muted">
+          {sentence.translations.map((translation, index) => (
+            <span key={translation.id} className="sourced" title={translation.english}>
+              {sentence.translations.length > 1 ? `${index + 1}: ` : 'Translation: '}
+              {translationSourceLabel(translation.source)}
+            </span>
+          ))}
+        </div>
+      )}
+    </>
   );
 }
 
@@ -174,6 +191,14 @@ export default function SentencesTab({ language }: { language: LanguageSummary }
   }, [language.id, offset, q, filter, fixing, changes]);
   useEffect(() => setOffset(0), [q, filter]);
 
+  const [open, setOpen] = useState<Set<number>>(new Set());
+  const toggle = (id: number) =>
+    setOpen((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   const updateRow = (id: number, patch: Partial<SentenceRow>) =>
     setData((current) => ({ ...current, rows: current.rows.map((row) => (row.id === id ? { ...row, ...patch } : row)) }));
   const voice = settings ? voiceFor('foreign', language, settings) : null;
@@ -235,14 +260,31 @@ export default function SentencesTab({ language }: { language: LanguageSummary }
                     </button>
                     {sentence.text}
                   </div>
-                  <div className="origin muted" title={sentence.audioAt ? `Generated ${new Date(sentence.audioAt).toLocaleString()}` : undefined}>
-                    Audio: {sentence.audioVoice ? voiceLabel(sentence.audioVoice) : settings?.tts.provider === 'browser' ? 'voice of this device (not stored)' : 'not generated yet'}
-                    {sentence.englishAudioVoice && sentence.englishAudioVoice !== sentence.audioVoice && <> · English: {voiceLabel(sentence.englishAudioVoice)}</>}
+                  <div className="origin muted">
+                    From: {sentence.sourceTitle ?? 'unknown'} · Audio:{' '}
+                    {sentence.audio.length
+                      ? sentence.audio.map((recording) => voiceLabel(recording.voice)).join(', ')
+                      : settings?.tts.provider === 'browser'
+                        ? 'voice of this device (not stored)'
+                        : 'not generated yet'}
                   </div>
+                  {open.has(sentence.id) && (
+                    <div className="sentence-details">
+                      <div>
+                        <span className="muted">Recordings of the sentence</span>
+                        <Recordings target={language.id} text={sentence.text} initial={sentence.audio} />
+                      </div>
+                      {sentence.english && (
+                        <div>
+                          <span className="muted">Recordings of the translation “{sentence.english}”</span>
+                          <Recordings target="english" text={sentence.english} initial={sentence.englishAudio} />
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </td>
                 <td>
-                  <TranslationCell langId={language.id} sentence={sentence} onSaved={(english) => updateRow(sentence.id, { english, translationSource: 'manual' })} />
-                  {sentence.translationSource && <div className="origin muted">Translation: {translationSourceLabel(sentence.translationSource)}</div>}
+                  <TranslationCell langId={language.id} sentence={sentence} onSaved={() => setChanges((n) => n + 1)} />
                 </td>
                 <td>
                   <select className={sentence.excludedReason ? 'status-excluded' : ''} value={sentence.excludedReason ?? ''} onChange={(event) => void setStatus(sentence, event.target.value)}>
@@ -256,8 +298,15 @@ export default function SentencesTab({ language }: { language: LanguageSummary }
                 </td>
                 <td className="actions">
                   <button
+                    className={`icon-button ${open.has(sentence.id) ? 'active' : ''}`}
+                    title="Recordings and their sources"
+                    onClick={() => toggle(sentence.id)}
+                  >
+                    <Mic size={14} />
+                  </button>
+                  <button
                     className="icon-button"
-                    title="Translate again"
+                    title="Translate again (keeps the current translation as another one)"
                     onClick={async () => trackJob(await run(() => api.retranslateSentences(language.id, { ids: [sentence.id], provider: options.translator })))}
                   >
                     <Languages size={14} />

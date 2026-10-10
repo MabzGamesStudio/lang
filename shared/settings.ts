@@ -42,6 +42,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
     sentenceThreshold: 0.8,
     speechThreshold: 0.7,
     autoAdvanceMs: 900,
+    reciteMaxWords: 7,
+    questionTextScale: 100,
     retypeOnMistake: true,
     pauseOnInexact: true,
     batchPreview: 'every',

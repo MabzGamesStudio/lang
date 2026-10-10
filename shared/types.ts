@@ -45,6 +45,14 @@ export interface WordLevels {
   translate: number;
 }
 
+// A stored audio recording of a word or sentence, and the voice that made it
+// ("colab:es-ES-ElviraNeural", "azure:…", "legacy-male"...).
+export interface Recording {
+  id: number;
+  voice: string;
+  createdAt: number;
+}
+
 export interface WordRow {
   id: number;
   word: string;
@@ -53,6 +61,11 @@ export interface WordRow {
   count: number;
   score: number;
   english: string[];
+  // Where each English meaning came from ("wiktionary", "llm:…", "manual"...).
+  englishSources: string[];
+  // Books and word lists the word was found in (listings only).
+  origins?: { title: string; count: number }[];
+  audio?: Recording[];
   pronunciation: string | null;
   pos: string | null;
   definitionSource: string | null;
@@ -81,11 +94,13 @@ export interface SentenceRow {
   maxRank: number | null;
   excludedReason: SentenceExclusion | null;
   excludedAt: number | null;
-  // Where the stored audio of the sentence (and of its translation) came from:
-  // the voice key, e.g. "colab:es-ES-ElviraNeural". null: not generated.
-  audioVoice: string | null;
-  audioAt: number | null;
-  englishAudioVoice: string | null;
+  // The book or text the sentence comes from.
+  sourceTitle: string | null;
+  // Every translation with its source; the first is the main one (english).
+  translations: { id: number; english: string; source: string }[];
+  // Stored recordings of the sentence and of its main translation.
+  audio: Recording[];
+  englishAudio: Recording[];
 }
 
 export interface SourceRow {
@@ -148,7 +163,21 @@ export interface Question {
   response: { mode: ResponseMode; side: Side };
   options?: ChoiceOption[];
   accepted?: AcceptedAnswer[];
-  sentence?: { id: number; text: string; english: string | null; tokens: SentenceToken[] };
+  sentence?: {
+    id: number;
+    // The sentence, or the part of it a recite question asks for.
+    text: string;
+    // Main translation, and every translation (answers are checked against all).
+    english: string | null;
+    translations: string[];
+    tokens: SentenceToken[];
+    // Recite questions on long sentences: the whole sentence, and which part this is.
+    full?: string;
+    part?: { index: number; count: number };
+  };
+  // Translate questions: the words of the sentence that are not scored (not
+  // met yet, further on, names), given with their meanings.
+  hints?: { text: string; english: string[] }[];
   answer: string;
   answerSide: Side;
   words: QuestionWord[];
@@ -259,6 +288,11 @@ export interface LearningSettings {
   retypeOnMistake: boolean;
   // Stay on the feedback when a typed answer was accepted but not spelled exactly.
   pauseOnInexact: boolean;
+  // Recite questions: longer sentences are split into parts of at most this
+  // many words (0 = whole sentences).
+  reciteMaxWords: number;
+  // Size of the text of questions and answers, in percent.
+  questionTextScale: number;
   batchPreview: BatchPreviewMode;
   memorizeHide: boolean;
   playAudioOnFeedback: boolean;

@@ -105,10 +105,21 @@ function sentenceOutcome(
 ): Outcome {
   const sentence = question.sentence!;
   const foreignAnswer = question.response.side === 'foreign';
-  const expected = foreignAnswer
-    ? sentence.tokens.map((token) => normalizeForCompare(token.text, locale))
-    : normalizedTokens(stripParentheticals(question.answer), 'en');
-  const alignment = alignTokens(expected, actual, { accentLenient, closeSimilarity });
+  // An English answer may match any of the sentence's translations: the closest counts.
+  const references = foreignAnswer ? [question.answer] : (question.accepted ?? []).map((answer) => answer.text).filter(Boolean);
+  if (references.length === 0) references.push(question.answer);
+  let alignment = alignTokens([], actual, { accentLenient, closeSimilarity });
+  let reference = question.answer;
+  references.forEach((candidate, index) => {
+    const expected = foreignAnswer
+      ? sentence.tokens.map((token) => normalizeForCompare(token.text, locale))
+      : normalizedTokens(stripParentheticals(candidate), 'en');
+    const aligned = alignTokens(expected, actual, { accentLenient, closeSimilarity });
+    if (index === 0 || aligned.score > alignment.score) {
+      alignment = aligned;
+      reference = candidate;
+    }
+  });
   const score = foreignAnswer
     ? countedScore(
         alignment.tokens,
@@ -140,6 +151,7 @@ function sentenceOutcome(
     response,
     score,
     alignment: alignment.tokens,
+    ...(reference !== question.answer ? { matched: reference } : {}),
     results,
   };
 }
