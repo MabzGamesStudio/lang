@@ -111,24 +111,101 @@ export interface IpaQuestion {
   scored: string[];
 }
 
-export interface IpaNextRequest {
-  gameId: IpaGameId;
-  recent: string[];
+// What is practised: which sounds, and which words.
+export interface IpaScope {
   sounds: IpaSoundSet;
   // "examples" (the example words of each sound) or the id of one of your
   // languages (its words with an IPA pronunciation).
   words: string;
 }
 
+// Free practice: one game.
+export interface IpaNextRequest extends IpaScope {
+  gameId: IpaGameId;
+  recent: string[];
+}
+
+// Personal progress: learning new sounds, or reviewing the sounds due.
+export interface IpaSessionRequest extends IpaScope {
+  mode: 'learn' | 'review';
+  recent: string[];
+  lastGameId: IpaGameId | null;
+}
+
+// Sounds are learnt like words: in batches of 7 (in learning order), and
+// blocks of 3 batches go through the phases together.
+export const IPA_BLOCK_BATCHES = 3;
+
+export interface IpaBatchSound {
+  symbol: string;
+  name: string;
+  kind: SoundKind;
+  levels: WordLevels;
+  srsStage: number;
+  // The phases it can be practised in (without words or a recording of the
+  // sound, some games are not possible).
+  phases: Phase[];
+}
+
+export interface IpaSessionState {
+  mode: 'learn' | 'review';
+  block: number | null;
+  batch: number | null;
+  phase: Phase | null;
+  batchSounds: IpaBatchSound[];
+  // The batch has not been practised yet.
+  newBatch: boolean;
+}
+
+export type IpaNoticeKind = 'empty' | 'noQuestion' | 'reviewsDone' | 'complete';
+
+export interface IpaNotice {
+  kind: IpaNoticeKind;
+  message: string;
+  nextDueAt?: number | null;
+}
+
 export interface IpaNextResponse {
   question: IpaQuestion | null;
-  notice: string | null;
+  notice: IpaNotice | null;
+  // Personal progress: where the learner is.
+  state?: IpaSessionState;
 }
 
 export interface IpaResult {
   symbol: string;
   phase: Phase;
   correct: boolean;
+}
+
+export interface IpaResultsResponse {
+  levels: Record<string, WordLevels>;
+  // Sounds mastered in every phase by these answers, and reviews completed.
+  learned: string[];
+  reviewed: string[];
+}
+
+export interface IpaProgressSummary {
+  // Your languages with words that have an IPA pronunciation.
+  languages: { id: string; name: string; words: number }[];
+  totalSounds: number;
+  learnedSounds: number;
+  reviewingSounds: number;
+  dueNow: number;
+  dueToday: number;
+  nextDueAt: number | null;
+  // Sounds that cannot be practised with these words (no word contains them
+  // and their recording is not downloaded).
+  unavailable: string[];
+  learn: IpaSessionState | null;
+  learnNotice: IpaNotice | null;
+  // Sounds introduced so far, by level, per phase.
+  phaseLevels: Record<Phase, number[]>;
+  srsStages: number[];
+  upcoming: { day: string; count: number }[];
+  activity: { day: string; correct: number; wrong: number }[];
+  streak: number;
+  blocks: { block: number; sounds: string[]; learned: number; complete: Record<Phase, number>; applicable: Record<Phase, number> }[];
 }
 
 // A stored recording and where it came from: "commons:<file name>" (Wikimedia

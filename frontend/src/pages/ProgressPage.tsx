@@ -5,27 +5,13 @@ import { api, errorMessage } from '../api';
 import { useApp } from '../state/AppContext';
 import { formatRelative } from '../lib/hooks';
 import LevelDots from '../components/LevelDots';
+import Bars from '../components/Bars';
 import { SessionHeader } from './SessionPage';
 import { PHASES, PHASE_LABELS } from '../../../shared/games';
 import { BLOCK_SIZE, REVIEW_INTERVALS_DAYS, describeInterval, levelNames } from '../../../shared/scoring';
 import type { ProgressSummary } from '../../../shared/types';
 
-function Bars({ values, labels, className }: { values: number[]; labels: string[]; className?: string }) {
-  const max = Math.max(1, ...values);
-  return (
-    <div className={`bars ${className ?? ''}`}>
-      {values.map((value, index) => (
-        <div key={labels[index]} className="bar-col" title={`${labels[index]}: ${value}`}>
-          <span className="value">{value || ''}</span>
-          <span className="fill" style={{ height: `${(value / max) * 100}%` }} />
-          <span className="label">{labels[index]}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function percent(part: number, whole: number): number {
+export function percent(part: number, whole: number): number {
   return whole > 0 ? Math.round((part / whole) * 100) : 0;
 }
 

@@ -95,7 +95,14 @@ function MissingDefinitions({
   );
 }
 
-export function SessionHeader({ state }: { state: SessionState }) {
+// Where a session is: block, batch (its place in the block) and phase.
+export function SessionHeader({
+  state,
+  blockBatches = BLOCK_BATCHES,
+}: {
+  state: Pick<SessionState, 'mode' | 'block' | 'batch' | 'phase'>;
+  blockBatches?: number;
+}) {
   if (!state.phase) return null;
   return (
     <div className="session-header">
@@ -105,7 +112,7 @@ export function SessionHeader({ state }: { state: SessionState }) {
         <>
           <span className="pill">Block {state.block}</span>
           <span className="pill">
-            Batch {state.batch} ({(((state.batch ?? 1) - 1) % BLOCK_BATCHES) + 1}/{BLOCK_BATCHES})
+            Batch {state.batch} ({(((state.batch ?? 1) - 1) % blockBatches) + 1}/{blockBatches})
           </span>
         </>
       )}

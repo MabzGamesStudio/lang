@@ -9,6 +9,8 @@ import SessionPage from './pages/SessionPage';
 import ConfigPage from './pages/config/ConfigPage';
 import PronunciationPage from './pages/PronunciationPage';
 import PronunciationPlayPage from './pages/PronunciationPlayPage';
+import PronunciationProgressPage from './pages/PronunciationProgressPage';
+import PronunciationSessionPage from './pages/PronunciationSessionPage';
 
 function Routed() {
   const { ready, languageId } = useApp();
@@ -27,6 +29,8 @@ function Routed() {
         <Route path="/progress" element={<ProgressPage />} />
         <Route path="/progress/session" element={<SessionPage key={languageId ?? ''} />} />
         <Route path="/pronunciation" element={<PronunciationPage />} />
+        <Route path="/pronunciation/progress" element={<PronunciationProgressPage />} />
+        <Route path="/pronunciation/session" element={<PronunciationSessionPage />} />
         <Route path="/pronunciation/:gameId" element={<PronunciationPlayPage />} />
         <Route path="/config" element={<ConfigPage />} />
         <Route path="/config/:tab" element={<ConfigPage />} />

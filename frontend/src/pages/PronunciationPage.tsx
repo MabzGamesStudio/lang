@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Download, ExternalLink, Loader2, Play, Plus, RotateCcw, Trash2, Volume2, X } from 'lucide-react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { BarChart3, Download, ExternalLink, GraduationCap, Loader2, Play, Plus, RotateCcw, Trash2, Volume2, X } from 'lucide-react';
 import { api, errorMessage } from '../api';
 import { useApp } from '../state/AppContext';
 import { useStoredState } from '../lib/hooks';
@@ -12,7 +12,14 @@ import IpaGameIcons from '../components/ipa/IpaGameIcons';
 import { soundRef } from '../components/ipa/IpaFeedback';
 import { PHASES, PHASE_LABELS, type Phase } from '../../../shared/games';
 import { EXAMPLE_LOCALES } from '../../../shared/ipa/inventory';
-import { IPA_GAMES, type IpaRecording, type IpaSoundSet, type IpaSoundSummary, type IpaSummary } from '../../../shared/ipa/games';
+import {
+  IPA_GAMES,
+  type IpaProgressSummary,
+  type IpaRecording,
+  type IpaSoundSet,
+  type IpaSoundSummary,
+  type IpaSummary,
+} from '../../../shared/ipa/games';
 import type { TtsProvider } from '../../../shared/types';
 
 export const IPA_PHASE_DESCRIPTIONS: Record<Phase, string> = {
@@ -199,6 +206,17 @@ export default function PronunciationPage() {
     if (summary && words !== 'examples' && !summary.languages.some((language) => language.id === words)) setWords('examples');
   }, [summary, words]);
 
+  // Personal progress at a glance.
+  const [progress, setProgress] = useState<IpaProgressSummary | null>(null);
+  useEffect(() => {
+    if (!summary) return;
+    const valid = words === 'examples' || summary.languages.some((language) => language.id === words);
+    api
+      .ipaProgress({ sounds, words: valid ? words : 'examples' })
+      .then(setProgress)
+      .catch(() => setProgress(null));
+  }, [summary, sounds, words]);
+
   if (error) {
     return (
       <div className="page narrow">
@@ -235,6 +253,31 @@ export default function PronunciationPage() {
         Learn the sounds of the International Phonetic Alphabet: hear each sound, link it to its symbol, and read and write words in IPA.
         English sounds come first; sounds English does not have are taught with words of other languages.
       </p>
+
+      <div className="menu-actions">
+        <Link to="/pronunciation/progress" className="menu-action primary">
+          <BarChart3 size={28} />
+          <div>
+            <strong>Personal progress</strong>
+            <span>
+              {progress
+                ? `${progress.learnedSounds} of ${progress.totalSounds} sounds learned · ${progress.dueNow} due for review`
+                : 'Sounds learned, reviews, activity'}
+            </span>
+          </div>
+        </Link>
+        <Link to="/pronunciation/session?mode=learn" className="menu-action">
+          <GraduationCap size={28} />
+          <div>
+            <strong>Continue learning</strong>
+            <span className="muted">
+              {progress?.learn
+                ? `Batch ${progress.learn.batch} · ${PHASE_LABELS[progress.learn.phase!]}: ${progress.learn.batchSounds.map((sound) => sound.symbol).join(' ')}`
+                : 'Batches of 7 sounds through the four phases'}
+            </span>
+          </div>
+        </Link>
+      </div>
 
       <div className="card ipa-options">
         <div className="field-row">
@@ -352,7 +395,7 @@ export default function PronunciationPage() {
         <button
           className="button danger"
           onClick={async () => {
-            if (!window.confirm('Reset your progress in the pronunciation mode?')) return;
+            if (!window.confirm('Reset your progress in the pronunciation mode (levels, learned sounds, reviews and activity)?')) return;
             try {
               await api.ipaReset();
               reload();

@@ -1,5 +1,16 @@
 import type { GameId } from '../../shared/games';
-import type { IpaAudioRef, IpaNextRequest, IpaNextResponse, IpaRecording, IpaResult, IpaSummary } from '../../shared/ipa/games';
+import type {
+  IpaAudioRef,
+  IpaNextRequest,
+  IpaNextResponse,
+  IpaProgressSummary,
+  IpaRecording,
+  IpaResult,
+  IpaResultsResponse,
+  IpaScope,
+  IpaSessionRequest,
+  IpaSummary,
+} from '../../shared/ipa/games';
 import type {
   AppSettings,
   GutenbergBook,
@@ -20,7 +31,6 @@ import type {
   SourceRow,
   TranslationProvider,
   TtsProvider,
-  WordLevels,
   WordResult,
   WordRow,
 } from '../../shared/types';
@@ -167,7 +177,9 @@ export const api = {
   ipaSummary: () => get<IpaSummary>('/ipa'),
   ipaDownload: () => post<JobInfo>('/ipa/download'),
   ipaNext: (body: IpaNextRequest) => post<IpaNextResponse>('/ipa/next', body),
-  ipaResults: (results: IpaResult[]) => post<{ levels: Record<string, WordLevels> }>('/ipa/results', { results }),
+  ipaSessionNext: (body: IpaSessionRequest) => post<IpaNextResponse>('/ipa/session/next', body),
+  ipaProgress: (scope: IpaScope) => get<IpaProgressSummary>(`/ipa/progress${query({ sounds: scope.sounds, words: scope.words })}`),
+  ipaResults: (results: IpaResult[], scope: IpaScope) => post<IpaResultsResponse>('/ipa/results', { results, ...scope }),
   ipaReset: () => post<{ ok: true }>('/ipa/reset'),
   ipaAudioUrl: (ref: Pick<IpaAudioRef, 'kind' | 'lang' | 'text'>) => `/api/ipa/audio${query({ kind: ref.kind, lang: ref.lang, text: ref.text })}`,
   ipaRecordingUrl: (id: number) => `/api/ipa/recordings/${id}`,

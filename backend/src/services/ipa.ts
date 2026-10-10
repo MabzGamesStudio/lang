@@ -6,8 +6,8 @@ import { getLanguageConfig } from './languages.js';
 import { decodeEntities } from './textProcessing.js';
 import { parseEnglish, pickRandom, shuffle } from './util.js';
 import { getAudio, speakInLocale, ttsGenerates } from '../providers/speech.js';
-import { PHASES, type Phase } from '../../../shared/games.js';
-import { BATCH_SIZE, nextLevel, requiredLevels } from '../../../shared/scoring.js';
+import type { Phase } from '../../../shared/games.js';
+import { BATCH_SIZE, requiredLevels } from '../../../shared/scoring.js';
 import {
   EXAMPLE_LOCALES,
   IPA_BY_SYMBOL,
@@ -20,7 +20,18 @@ import {
   type IpaExample,
   type IpaSound,
 } from '../../../shared/ipa/inventory.js';
-import { blankSound, firstTranscription, looksLikeIpa, looseIpa, normalizeIpa, replaceSound, soundsIn, tidyIpa } from '../../../shared/ipa/text.js';
+import {
+  baseSound,
+  blankSound,
+  firstTranscription,
+  looksLikeIpa,
+  looseIpa,
+  normalizeIpa,
+  replaceSound,
+  segmentIpa,
+  soundsIn,
+  tidyIpa,
+} from '../../../shared/ipa/text.js';
 import {
   IPA_GAMES_BY_ID,
   type IpaAudioRef,
@@ -30,7 +41,7 @@ import {
   type IpaOption,
   type IpaQuestion,
   type IpaRecording,
-  type IpaResult,
+  type IpaScope,
   type IpaSummary,
   type IpaWord,
 } from '../../../shared/ipa/games.js';
@@ -514,11 +525,11 @@ function languagePool(langId: string): PoolWord[] {
 }
 
 // ---------------------------------------------------------------------------
-// Progress
+// Progress (levels per sound; the learning engine is in ipaProgress.ts)
 
-type SoundProgress = WordLevels & { correct: number; wrong: number };
+export type SoundProgress = WordLevels & { correct: number; wrong: number };
 
-function progressOf(db: DB): Map<string, SoundProgress> {
+export function progressOf(db: DB): Map<string, SoundProgress> {
   const rows = db
     .prepare(
       `SELECT symbol, recognition_level AS recognition, recall_level AS recall, recite_level AS recite,
@@ -530,48 +541,16 @@ function progressOf(db: DB): Map<string, SoundProgress> {
 
 const NO_PROGRESS: SoundProgress = { recognition: 0, recall: 0, recite: 0, translate: 0, correct: 0, wrong: 0 };
 
-function levelsOnly(progress: SoundProgress): WordLevels {
-  return { recognition: progress.recognition, recall: progress.recall, recite: progress.recite, translate: progress.translate };
-}
-
-export function applyIpaResults(results: IpaResult[]): Record<string, WordLevels> {
-  const db = englishDatabase();
-  const required = requiredLevels(getSettings().learning);
-  const now = Date.now();
-  const touched = new Set<string>();
-  db.transaction(() => {
-    const create = db.prepare(`INSERT OR IGNORE INTO ipa_progress (symbol) VALUES (?)`);
-    for (const result of results) {
-      if (!IPA_BY_SYMBOL[result.symbol] || !PHASES.includes(result.phase)) continue;
-      const phase: Phase = result.phase;
-      create.run(result.symbol);
-      const { level } = db.prepare(`SELECT ${phase}_level AS level FROM ipa_progress WHERE symbol = ?`).get(result.symbol) as { level: number };
-      db.prepare(`UPDATE ipa_progress SET ${phase}_level = ?, correct = correct + ?, wrong = wrong + ?, last_seen_at = ? WHERE symbol = ?`).run(
-        nextLevel(phase, level, result.correct, required[phase]),
-        result.correct ? 1 : 0,
-        result.correct ? 0 : 1,
-        now,
-        result.symbol
-      );
-      touched.add(result.symbol);
-    }
-  })();
-  const progress = progressOf(db);
-  return Object.fromEntries([...touched].map((symbol) => [symbol, levelsOnly(progress.get(symbol) ?? NO_PROGRESS)]));
-}
-
-export function resetIpaProgress(): void {
-  englishDatabase().prepare(`DELETE FROM ipa_progress`).run();
+export function levelsOnly(progress: SoundProgress | undefined): WordLevels {
+  const own = progress ?? NO_PROGRESS;
+  return { recognition: own.recognition, recall: own.recall, recite: own.recite, translate: own.translate };
 }
 
 // ---------------------------------------------------------------------------
 // Overview
 
-export function ipaSummary(): IpaSummary {
-  const db = englishDatabase();
-  const recordings = recordingIndex(db);
-  const progress = progressOf(db);
-  const recordingsOf = (lang: string, text: string) => recordings.get(itemKey(lang, text)) ?? [];
+// Your languages with words that have an IPA pronunciation.
+export function ipaLanguages(): IpaSummary['languages'] {
   const languages: IpaSummary['languages'] = [];
   for (const id of listLanguageIds()) {
     try {
@@ -581,6 +560,14 @@ export function ipaSummary(): IpaSummary {
       // A language that cannot be opened is left out.
     }
   }
+  return languages.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export function ipaSummary(): IpaSummary {
+  const db = englishDatabase();
+  const recordings = recordingIndex(db);
+  const progress = progressOf(db);
+  const recordingsOf = (lang: string, text: string) => recordings.get(itemKey(lang, text)) ?? [];
   const examples = uniqueExamples();
   return {
     sounds: IPA_SOUNDS.map((sound) => {
@@ -603,7 +590,7 @@ export function ipaSummary(): IpaSummary {
       };
     }),
     required: requiredLevels(getSettings().learning),
-    languages: languages.sort((a, b) => a.name.localeCompare(b.name)),
+    languages: ipaLanguages(),
     download: {
       sounds: IPA_SOUNDS.filter((sound) => recordingsOf(SOUND_LANG, sound.symbol).some((r) => r.source.startsWith('commons:'))).length,
       soundFiles: IPA_SOUNDS.filter((sound) => sound.file).length,
@@ -615,6 +602,58 @@ export function ipaSummary(): IpaSummary {
 
 // ---------------------------------------------------------------------------
 // Questions
+
+// Everything a question needs: the sounds practised (in learning order), the
+// words, which sounds have a recording, and the progress so far.
+export interface IpaContext {
+  db: DB;
+  scope: IpaScope;
+  progress: Map<string, SoundProgress>;
+  // The sounds practised, in learning order.
+  ordered: IpaSound[];
+  examples: boolean;
+  pool: PoolWord[];
+  // Words that can be typed (transcription → word).
+  typeable: PoolWord[];
+  // Sounds with a recording of their own, with words, with words to type.
+  recorded: Set<string>;
+  withWords: Set<string>;
+  withTypeable: Set<string>;
+  choices: number;
+}
+
+// Latin letters (with accents) can be typed on any keyboard.
+const LATIN_WORD = /^[\p{Script=Latin}\s'’-]+$/u;
+
+export function ipaContext(scope: IpaScope): IpaContext {
+  const db = englishDatabase();
+  const examples = scope.words === 'examples' || !scope.words;
+  let pool = examples ? EXAMPLE_POOL : languagePool(scope.words);
+  if (examples && scope.sounds === 'english') pool = pool.filter((word) => word.lang === 'en' || word.lang === 'en-GB');
+  const typeable = examples ? pool.filter((word) => LATIN_WORD.test(word.word)) : pool;
+  const recorded = new Set(
+    (db.prepare(`SELECT DISTINCT text FROM ipa_audio WHERE lang = ?`).all(SOUND_LANG) as { text: string }[]).map((row) => row.text)
+  );
+  return {
+    db,
+    scope: { sounds: scope.sounds === 'all' ? 'all' : 'english', words: examples ? 'examples' : scope.words },
+    progress: progressOf(db),
+    ordered: LEARNING_ORDER.map((symbol) => IPA_BY_SYMBOL[symbol]).filter((sound) => scope.sounds === 'all' || isEnglishSound(sound)),
+    examples,
+    pool,
+    typeable,
+    recorded,
+    withWords: new Set(pool.flatMap((word) => word.sounds)),
+    withTypeable: new Set(typeable.flatMap((word) => word.sounds)),
+    choices: Math.max(2, Math.min(6, getSettings().learning.choiceCount || 4)),
+  };
+}
+
+// Games on a sound alone need its recording; the others need words with it.
+export function ipaGameApplicable(game: IpaGameDef, symbol: string, ctx: IpaContext): boolean {
+  if (game.unit === 'sound' && game.id !== 'examplesToSymbolTyped') return ctx.recorded.has(symbol);
+  return (game.id === 'ipaToWordTyped' ? ctx.withTypeable : ctx.withWords).has(symbol);
+}
 
 function soundAudio(symbol: string): IpaAudioRef {
   return { kind: 'sound', text: symbol, lang: SOUND_LANG, locale: '' };
@@ -647,10 +686,6 @@ function similarSounds(target: IpaSound, among: IpaSound[], count: number): IpaS
   return shuffle(ranked.slice(0, Math.max(count * 2, 6))).slice(0, count);
 }
 
-function choiceCount(): number {
-  return Math.max(2, Math.min(6, getSettings().learning.choiceCount || 4));
-}
-
 function questionKey(gameId: string, symbol: string): string {
   return `${gameId}:${symbol}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -675,90 +710,63 @@ function wordFor(symbol: string, pool: PoolWord[], examplesFirst: boolean): Pool
   return pickRandom(preferred.length && Math.random() < 0.75 ? preferred : containing) ?? null;
 }
 
-// Latin letters (with accents) can be typed on any keyboard.
-const LATIN_WORD = /^[\p{Script=Latin}\s'’-]+$/u;
+// A question of a game on a sound, or null when the game is not possible for it.
+export function buildIpaQuestion(game: IpaGameDef, symbol: string, ctx: IpaContext): IpaQuestion | null {
+  const sound = IPA_BY_SYMBOL[symbol];
+  if (!sound || !ipaGameApplicable(game, symbol, ctx)) return null;
+  const met = (other: string) => (ctx.progress.get(other)?.[game.phase] ?? 0) > 0;
+  const base = { key: questionKey(game.id, symbol), gameId: game.id, phase: game.phase, symbol, sound: soundInfo(sound) };
+  const count = ctx.choices;
 
-const NO_SOUND_RECORDINGS =
-  'The recordings of the sounds are not downloaded yet. Download them on the Pronunciation page (from Wikimedia Commons, needs internet), or play a game with words.';
-
-export function nextIpaQuestion(request: IpaNextRequest): IpaNextResponse {
-  const game: IpaGameDef | undefined = IPA_GAMES_BY_ID[request.gameId];
-  if (!game) throw new HttpError(400, 'Unknown pronunciation game');
-  const db = englishDatabase();
-  const progress = progressOf(db);
-  const required = requiredLevels(getSettings().learning)[game.phase];
-  const recent = Array.isArray(request.recent) ? request.recent.filter((symbol) => typeof symbol === 'string') : [];
-  const inSet = IPA_SOUNDS.filter((sound) => request.sounds !== 'english' || isEnglishSound(sound));
-  const count = choiceCount();
-  const met = (symbol: string) => (progress.get(symbol)?.[game.phase] ?? 0) > 0;
-
-  // Games on sounds alone need their recordings.
+  // Games on sounds alone.
   if (game.unit === 'sound' && game.id !== 'examplesToSymbolTyped') {
-    const recorded = new Set(
-      (db.prepare(`SELECT DISTINCT text FROM ipa_audio WHERE lang = ?`).all(SOUND_LANG) as { text: string }[]).map((row) => row.text)
-    );
-    const playable = inSet.filter((sound) => recorded.has(sound.symbol));
-    const symbol = pickTarget(new Set(playable.map((sound) => sound.symbol)), progress, game.phase, required, recent);
-    if (!symbol) return { question: null, notice: NO_SOUND_RECORDINGS };
-    const sound = IPA_BY_SYMBOL[symbol];
-    const base = { key: questionKey(game.id, symbol), gameId: game.id, phase: game.phase, symbol, sound: soundInfo(sound), answer: symbol, scored: [symbol] };
     if (game.id === 'soundToSymbol' || game.id === 'symbolToSound') {
-      const distractors = similarSounds(sound, game.id === 'symbolToSound' ? playable : inSet, count - 1);
-      const options: IpaOption[] = shuffle([sound, ...distractors]).map((option) => ({
+      const among = game.id === 'symbolToSound' ? ctx.ordered.filter((other) => ctx.recorded.has(other.symbol)) : ctx.ordered;
+      const options: IpaOption[] = shuffle([sound, ...similarSounds(sound, among, count - 1)]).map((option) => ({
         text: option.symbol,
         correct: option.symbol === symbol,
         symbol: option.symbol,
         scored: option.symbol !== symbol && met(option.symbol),
         ...(game.id === 'symbolToSound' ? { audio: soundAudio(option.symbol) } : {}),
       }));
-      return { question: { ...base, ...(game.id === 'soundToSymbol' ? { audio: soundAudio(symbol) } : {}), options }, notice: null };
+      if (options.length < 2) return null;
+      return { ...base, ...(game.id === 'soundToSymbol' ? { audio: soundAudio(symbol) } : {}), options, answer: symbol, scored: [symbol] };
     }
-    return { question: { ...base, audio: soundAudio(symbol) }, notice: null };
+    return { ...base, audio: soundAudio(symbol), answer: symbol, scored: [symbol] };
   }
 
-  // Games with words.
-  const examples = request.words === 'examples' || !request.words;
-  let pool = examples ? EXAMPLE_POOL : languagePool(request.words);
-  if (examples && request.sounds === 'english') pool = pool.filter((word) => word.lang === 'en' || word.lang === 'en-GB');
-  if (game.id === 'ipaToWordTyped' && examples) pool = pool.filter((word) => LATIN_WORD.test(word.word));
-  if (pool.length === 0) {
-    return {
-      question: null,
-      notice: examples
-        ? 'No example words for these sounds.'
-        : 'This language has no words with an IPA pronunciation yet: fetch definitions (Configuration → Words) to get them.',
-    };
-  }
-  const present = new Set(pool.flatMap((word) => word.sounds));
-  const symbol = pickTarget(new Set(inSet.filter((sound) => present.has(sound.symbol)).map((sound) => sound.symbol)), progress, game.phase, required, recent);
-  if (!symbol) return { question: null, notice: 'None of these words contains the chosen sounds.' };
-  const sound = IPA_BY_SYMBOL[symbol];
-  const word = wordFor(symbol, pool, examples)!;
-  const base = { key: questionKey(game.id, symbol), gameId: game.id, phase: game.phase, symbol, sound: soundInfo(sound) };
+  const pool = game.id === 'ipaToWordTyped' ? ctx.typeable : ctx.pool;
+  const word = wordFor(symbol, pool, ctx.examples);
+  if (!word) return null;
 
   if (game.id === 'examplesToSymbolTyped') {
     const words = shuffle(pool.filter((candidate) => candidate.sounds.includes(symbol)))
       .sort((a, b) => Number(b.exampleOf.includes(symbol)) - Number(a.exampleOf.includes(symbol)))
       .slice(0, 3);
     return {
-      question: { ...base, examples: words.map((candidate) => ({ ...publicWord(candidate), blanked: blankSound(candidate.ipa, symbol) })), answer: symbol, scored: [symbol] },
-      notice: null,
+      ...base,
+      examples: words.map((candidate) => ({ ...publicWord(candidate), blanked: blankSound(candidate.ipa, symbol) })),
+      answer: symbol,
+      scored: [symbol],
     };
   }
 
   if (game.id === 'wordAudioToIpa') {
     // Transcriptions of the word with the sound swapped for a similar one.
-    // Variants that count as the same transcription (ʌ / ə, r / ɹ…) are left out.
+    // Variants that count as the same transcription (ʌ / ə, r / ɹ…) are left
+    // out, and so are swaps that put the same sound twice in a row (/ssɑ/).
+    const doubled = (text: string) => segmentIpa(text).map(baseSound).some((segment, index, all) => index > 0 && all[index - 1] === segment);
     const options: IpaOption[] = [{ text: word.ipa, correct: true, symbol }];
     const seen = new Set([looseIpa(word.ipa)]);
-    for (const other of similarSounds(sound, inSet, 8)) {
+    for (const other of similarSounds(sound, ctx.ordered, 10)) {
       if (options.length >= count) break;
       const variant = replaceSound(word.ipa, symbol, other.symbol);
-      if (seen.has(looseIpa(variant))) continue;
+      if (seen.has(looseIpa(variant)) || (doubled(variant) && !doubled(word.ipa))) continue;
       seen.add(looseIpa(variant));
       options.push({ text: variant, correct: false, symbol: other.symbol, scored: met(other.symbol) });
     }
-    return { question: { ...base, word: publicWord(word), audio: word.audio, options: shuffle(options), answer: word.ipa, scored: [symbol] }, notice: null };
+    if (options.length < 2) return null;
+    return { ...base, word: publicWord(word), audio: word.audio, options: shuffle(options), answer: word.ipa, scored: [symbol] };
   }
 
   if (game.id === 'ipaToWordAudio') {
@@ -766,7 +774,7 @@ export function nextIpaQuestion(request: IpaNextRequest): IpaNextResponse {
     const sameLanguage = pool.filter((candidate) => candidate.lang === word.lang && candidate.word !== word.word);
     const options: IpaOption[] = [{ text: word.word, correct: true, symbol, audio: word.audio, word: publicWord(word) }];
     const used = new Set([word.word]);
-    for (const other of similarSounds(sound, inSet, 8)) {
+    for (const other of similarSounds(sound, ctx.ordered, 8)) {
       if (options.length >= count) break;
       const candidate = pickRandom(sameLanguage.filter((w) => !used.has(w.word) && w.sounds.includes(other.symbol) && !w.sounds.includes(symbol)));
       if (!candidate) continue;
@@ -779,21 +787,50 @@ export function nextIpaQuestion(request: IpaNextRequest): IpaNextResponse {
       used.add(candidate.word);
       options.push({ text: candidate.word, correct: false, audio: candidate.audio, word: publicWord(candidate) });
     }
-    if (options.length < 2) return { question: null, notice: `Not enough ${word.langName} words to choose from.` };
-    return { question: { ...base, word: publicWord(word), options: shuffle(options), answer: word.word, scored: [symbol] }, notice: null };
+    if (options.length < 2) return null;
+    return { ...base, word: publicWord(word), options: shuffle(options), answer: word.word, scored: [symbol] };
   }
 
   // Typed answers: the transcription (every sound met before counts) or the word.
-  const scored = game.response === 'ipaTyped' ? [symbol, ...word.sounds.filter((other) => other !== symbol && met(other))] : [symbol];
   return {
-    question: {
-      ...base,
-      word: publicWord(word),
-      // Heard: words to transcribe, and transcriptions to learn by heart.
-      ...(game.prompt === 'wordAudio' || game.memorize ? { audio: word.audio } : {}),
-      answer: game.response === 'wordTyped' ? word.word : word.ipa,
-      scored,
-    },
-    notice: null,
+    ...base,
+    word: publicWord(word),
+    // Heard: words to transcribe, and transcriptions to learn by heart.
+    ...(game.prompt === 'wordAudio' || game.memorize ? { audio: word.audio } : {}),
+    answer: game.response === 'wordTyped' ? word.word : word.ipa,
+    scored: game.response === 'ipaTyped' ? [symbol, ...word.sounds.filter((other) => other !== symbol && met(other))] : [symbol],
   };
+}
+
+const NO_SOUND_RECORDINGS =
+  'The recordings of the sounds are not downloaded yet. Download them on the Pronunciation page (from Wikimedia Commons, needs internet), or play a game with words.';
+
+// Free practice of one game, on the sounds known least.
+export function nextIpaQuestion(request: IpaNextRequest): IpaNextResponse {
+  const game: IpaGameDef | undefined = IPA_GAMES_BY_ID[request.gameId];
+  if (!game) throw new HttpError(400, 'Unknown pronunciation game');
+  const ctx = ipaContext(request);
+  const recent = Array.isArray(request.recent) ? request.recent.filter((symbol) => typeof symbol === 'string') : [];
+  const notice = (message: string): IpaNextResponse => ({ question: null, notice: { kind: 'noQuestion', message } });
+  if (game.unit === 'word' || game.id === 'examplesToSymbolTyped') {
+    if (ctx.pool.length === 0) {
+      return notice(
+        ctx.examples
+          ? 'No example words for these sounds.'
+          : 'This language has no words with an IPA pronunciation yet: fetch definitions (Configuration → Words) to get them.'
+      );
+    }
+  }
+  const candidates = new Set(ctx.ordered.filter((sound) => ipaGameApplicable(game, sound.symbol, ctx)).map((sound) => sound.symbol));
+  if (candidates.size === 0) {
+    return notice(game.unit === 'sound' && game.id !== 'examplesToSymbolTyped' ? NO_SOUND_RECORDINGS : 'None of these words contains the chosen sounds.');
+  }
+  const required = requiredLevels(getSettings().learning)[game.phase];
+  const first = pickTarget(candidates, ctx.progress, game.phase, required, recent);
+  const targets = [...new Set([first, ...shuffle([...candidates])])].filter((symbol): symbol is string => Boolean(symbol));
+  for (const symbol of targets.slice(0, 8)) {
+    const question = buildIpaQuestion(game, symbol, ctx);
+    if (question) return { question, notice: null };
+  }
+  return notice('Not enough words or recordings to make this question: try other words or sounds.');
 }

@@ -349,3 +349,72 @@
     }
   }
 }
+
+// Personal progress of the pronunciation mode.
+.batch-word.batch-sound {
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+
+  .ipa {
+    font-size: 1.15rem;
+    line-height: 1;
+  }
+
+  &:hover {
+    border-color: var(--ipa);
+  }
+}
+
+.ipa-preview {
+  li strong.ipa {
+    min-width: 3.5rem;
+    font-size: 1.9rem;
+    color: var(--text);
+    text-align: center;
+  }
+
+  .gloss {
+    flex: 0 1 15rem;
+  }
+
+  .preview-examples {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    flex: 1;
+  }
+
+  .example-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0.15rem 0.55rem;
+    border-radius: 999px;
+    border: 1px solid var(--side, var(--border));
+    background: var(--surface-2);
+    color: var(--text);
+    font: inherit;
+    font-size: 0.85rem;
+    cursor: pointer;
+
+    &:hover {
+      background: var(--surface);
+    }
+  }
+}
+
+.pronunciation-progress {
+  .ipa {
+    color: inherit;
+  }
+
+  .block-sounds {
+    font-size: 1.05rem;
+    letter-spacing: 0.04em;
+  }
+
+  .batch-symbol {
+    font-size: 1.5rem;
+  }
+}

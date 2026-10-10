@@ -167,15 +167,21 @@ export function isEnglishSound(sound: IpaSound): boolean {
   return sound.examples.some(isEnglishExample);
 }
 
-// Order of learning: English consonants, English vowels, then the sounds of
-// other languages (consonants first).
+// English sounds that only occur as variants of others (butter, uh-oh, full).
+const ENGLISH_VARIANTS = new Set(['ɾ', 'ʔ', 'ɫ']);
+
+// Order of learning: English consonants written with the letter you would
+// expect (p, b, t…), the other English consonants (θ, ʃ, j…), English vowels,
+// English variants (ɾ, ʔ, ɫ), then the sounds of other languages.
+function learningGroup(sound: IpaSound): number {
+  if (!isEnglishSound(sound)) return sound.kind === 'consonant' ? 4 : 5;
+  if (ENGLISH_VARIANTS.has(sound.symbol)) return 3;
+  if (sound.kind === 'vowel') return 2;
+  return /^[a-ik-z]$|^ɡ$/.test(sound.symbol) ? 0 : 1;
+}
+
 export const LEARNING_ORDER: string[] = IPA_SOUNDS.map((sound, index) => ({ sound, index }))
-  .sort(
-    (a, b) =>
-      Number(!isEnglishSound(a.sound)) - Number(!isEnglishSound(b.sound)) ||
-      Number(a.sound.kind === 'vowel') - Number(b.sound.kind === 'vowel') ||
-      a.index - b.index
-  )
+  .sort((a, b) => learningGroup(a.sound) - learningGroup(b.sound) || a.index - b.index)
   .map(({ sound }) => sound.symbol);
 
 // Words of a sound's name that describe it ("voiceless", "dental", "fricative").
