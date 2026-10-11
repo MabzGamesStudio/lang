@@ -6,6 +6,7 @@ import { tokenize } from './textProcessing.js';
 import { parseEnglish, pickRandom, shuffle } from './util.js';
 import { WORD_COLUMNS, type WordDbRow } from './words.js';
 import { translationsOf } from './sentenceTranslations.js';
+import { preferencesOf, rankSql } from './sourced.js';
 import { glossKey } from '../../../shared/text.js';
 import type { GameDef } from '../../../shared/games.js';
 import type {
@@ -229,13 +230,30 @@ export function pickSentence(db: DB, wordId: number, needEnglish: boolean, front
         .all(JSON.stringify(candidates.map((c) => c.id)), frontier) as { id: number; n: number }[]
     ).map((row) => [row.id, row.n])
   );
+  // Sentences from the preferred texts first (Configuration → Sentences).
+  const preferred = preferencesOf(db).sentences;
+  const sourceRank = new Map<number, number>();
+  if (preferred.length) {
+    for (const row of db
+      .prepare(
+        `SELECT ss.sentence_id AS id, MIN(${rankSql('ss.source_id')}) AS rank FROM sentence_sources ss
+         WHERE ss.sentence_id IN (SELECT value FROM json_each(?)) GROUP BY ss.sentence_id`
+      )
+      .all(JSON.stringify(preferred), JSON.stringify(candidates.map((c) => c.id))) as { id: number; rank: number }[]) {
+      sourceRank.set(row.id, Math.min(row.rank, preferred.length));
+    }
+  }
   const now = Date.now();
   let best: SentenceCandidate | null = null;
   let bestScore = Infinity;
   for (const candidate of candidates) {
     const recent = candidate.lastUsedAt !== null && now - candidate.lastUsedAt < 15 * 60 * 1000;
     const score =
-      (unknown.get(candidate.id) ?? 0) * 3 + (recent ? 4 : 0) + Math.abs(candidate.wordCount - 7) * 0.25 + Math.random() * 1.5;
+      (unknown.get(candidate.id) ?? 0) * 3 +
+      (recent ? 4 : 0) +
+      Math.abs(candidate.wordCount - 7) * 0.25 +
+      Math.random() * 1.5 +
+      (preferred.length ? (sourceRank.get(candidate.id) ?? preferred.length) * 1.5 : 0);
     if (score < bestScore) {
       best = candidate;
       bestScore = score;

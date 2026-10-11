@@ -1,4 +1,4 @@
-import type { AppSettings, TranslationProvider, TtsProvider } from '../../../shared/types';
+import type { AppSettings, SourcedKind, TranslationProvider, TtsProvider } from '../../../shared/types';
 
 // Readable names for where stored audio and translations came from.
 
@@ -33,6 +33,7 @@ export function voiceLabel(key: string | null): string {
 export function translationSourceLabel(source: string | null): string {
   if (!source) return '';
   if (source === 'manual') return 'typed by you';
+  if (source.startsWith('word list: ')) return `word list “${source.slice('word list: '.length)}”`;
   if (source === 'deepl') return 'DeepL';
   if (source === 'google') return 'Google Translate';
   if (source === 'libretranslate') return 'LibreTranslate';
@@ -50,6 +51,29 @@ export function definitionSourceLabel(source: string | null): string {
   if (source === 'wiktionary') return 'Wiktionary';
   return translationSourceLabel(source);
 }
+
+// Where a pronunciation came from ("pinyin": made offline for Chinese).
+export function pronunciationSourceLabel(source: string | null): string {
+  if (source === 'pinyin') return 'pinyin made offline';
+  return definitionSourceLabel(source);
+}
+
+// The label of a source of any kind of data.
+export function sourceLabel(kind: SourcedKind, source: string): string {
+  if (kind === 'audio') return voiceLabel(source);
+  if (kind === 'translations') return translationSourceLabel(source);
+  if (kind === 'pronunciations') return pronunciationSourceLabel(source);
+  return definitionSourceLabel(source);
+}
+
+// What kind of text a word or sentence was found in.
+export const ORIGIN_KINDS: Record<string, string> = {
+  book: 'book',
+  text: 'text',
+  wordlist: 'word list',
+  generated: 'made by the language model',
+  legacy: 'earlier version of the app',
+};
 
 export const TRANSLATION_SERVICES: { value: TranslationProvider; label: string; ready: (settings: AppSettings) => boolean }[] = [
   { value: 'llm', label: 'Language model', ready: (s) => s.llm.provider !== 'none' },

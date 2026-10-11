@@ -2,7 +2,9 @@ import { HttpError, languageDb, type DB } from '../db/connection.js';
 import { getLanguageConfig } from './languages.js';
 import { cleanBookText, normalizeWord, parseCsv, processText } from './textProcessing.js';
 import { recomputeAll, recomputeRanks } from './ranking.js';
-import { addGlosses } from './glosses.js';
+import { addMeanings } from './glosses.js';
+import { addPronunciations } from './pronunciations.js';
+import { isChinese, isPinyin } from './chinese.js';
 import { downloadBook, searchGutenberg } from './gutenberg.js';
 import { registerEnglishWords } from './english.js';
 import { yieldToEventLoop, type JobContext } from './jobs.js';
@@ -72,15 +74,23 @@ export async function importText(
       insertCount.run(id, sourceId, counts.count, counts.mid, counts.cap);
     }
     const insertSentence = db.prepare(`INSERT OR IGNORE INTO sentences (text, source_id, word_count) VALUES (?, ?, ?)`);
+    const existingSentence = db.prepare(`SELECT id FROM sentences WHERE text = ?`);
     const insertSentenceWord = db.prepare(`INSERT INTO sentence_words (sentence_id, position, word_id) VALUES (?, ?, ?)`);
+    const linkSource = db.prepare(`INSERT OR IGNORE INTO sentence_sources (sentence_id, source_id) VALUES (?, ?)`);
     for (const sentence of processed.sentences) {
       const result = insertSentence.run(sentence.text, sourceId, sentence.words.length);
-      if (!result.changes) continue;
+      // A sentence already found in another text: this text is one more of its sources.
+      if (!result.changes) {
+        const existing = existingSentence.get(sentence.text) as { id: number } | undefined;
+        if (existing) linkSource.run(existing.id, sourceId);
+        continue;
+      }
       const sentenceId = Number(result.lastInsertRowid);
+      linkSource.run(sentenceId, sourceId);
       sentence.words.forEach((word, position) => insertSentenceWord.run(sentenceId, position, ids.get(word)!));
       sentencesAdded++;
     }
-    db.prepare(`UPDATE sources SET sentence_count = ? WHERE id = ?`).run(sentencesAdded, sourceId);
+    db.prepare(`UPDATE sources SET sentence_count = (SELECT COUNT(*) FROM sentence_sources WHERE source_id = ?) WHERE id = ?`).run(sourceId, sourceId);
   })();
 
   ctx?.message('Re-ranking words by frequency…');
@@ -237,19 +247,22 @@ export async function importWordList(
     );
     const insertCount = db.prepare(`INSERT INTO word_sources (word_id, source_id, count) VALUES (?, ?, ?)`);
     const definitionSource = `word list: ${input.title}`;
-    const setPronunciation = db.prepare(`UPDATE words SET pronunciation = ? WHERE id = ? AND pronunciation IS NULL`);
     const setPos = db.prepare(`UPDATE words SET pos = ? WHERE id = ? AND pos IS NULL`);
+    const meanings: { id: number; english: string[] }[] = [];
+    const pronunciations: { id: number; pronunciation: string }[] = [];
     for (const entry of values) {
       const id = wordIdFor(db, entry.word, config.locale);
       insertCount.run(id, sourceId, Math.round(entry.count ?? 1));
       if (entry.english.length) {
-        // Added to any meanings the word already has, with the list as source.
-        addGlosses(db, id, entry.english, definitionSource);
+        meanings.push({ id, english: entry.english });
         glosses.push(...entry.english);
       }
-      if (entry.pronunciation) setPronunciation.run(entry.pronunciation, id);
+      if (entry.pronunciation) pronunciations.push({ id, pronunciation: entry.pronunciation });
       if (entry.pos) setPos.run(entry.pos, id);
     }
+    // Added to the meanings and pronunciations words already have, with the list as source.
+    addMeanings(db, meanings, definitionSource);
+    addPronunciations(db, pronunciations, definitionSource, isChinese(config) ? { accept: isPinyin } : {});
   })();
   registerEnglishWords(glosses);
   recomputeAll(db, config);
@@ -283,6 +296,11 @@ export function updateSource(langId: string, sourceId: number, update: { title?:
 export function deleteSource(langId: string, sourceId: number): void {
   const db = languageDb(langId);
   db.transaction(() => {
+    // Sentences also found in another text stay, with that text as their first source.
+    db.prepare(
+      `UPDATE sentences SET source_id = (SELECT ss.source_id FROM sentence_sources ss WHERE ss.sentence_id = sentences.id AND ss.source_id != ? LIMIT 1)
+       WHERE source_id = ? AND EXISTS (SELECT 1 FROM sentence_sources ss WHERE ss.sentence_id = sentences.id AND ss.source_id != ?)`
+    ).run(sourceId, sourceId, sourceId);
     db.prepare(`DELETE FROM sources WHERE id = ?`).run(sourceId);
     // Forget words that no longer appear anywhere and were never studied or edited.
     db.exec(`

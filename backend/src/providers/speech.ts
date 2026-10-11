@@ -4,11 +4,13 @@ import { getLanguageConfig } from '../services/languages.js';
 import { getSettings } from '../services/settings.js';
 import { httpFetch, postForBytes, postJson } from '../services/http.js';
 import { audioText, parseEnglish } from '../services/words.js';
+import { preferenceJson, rankSql } from '../services/sourced.js';
+import { ACTIVE_WORDS, ONLY_MISSING, SENTENCES_IN_USE, audioNeeded } from '../services/regenerate.js';
 import { refreshSentenceCounts, wordIdsOfSentences } from '../services/ranking.js';
 import type { JobContext } from '../services/jobs.js';
 import { colabBaseUrl } from './llm.js';
 import { stripParentheticals } from '../../../shared/text.js';
-import type { AppSettings, Recording, TtsProvider } from '../../../shared/types.js';
+import type { AppSettings, Recording, RegeneratePolicy, TtsProvider } from '../../../shared/types.js';
 
 // ---------------------------------------------------------------------------
 // Text to speech. Generated audio is cached in the database (foreign audio in
@@ -179,17 +181,43 @@ export async function getAudio(target: string, text: string, generate: boolean):
   // Notes in parentheses are never spoken.
   const clean = stripParentheticals(text).slice(0, 500);
   if (!clean) return null;
-  // Any stored recording: with several voices, a different one each time.
-  const cached = voice.db.prepare(`SELECT mime, data FROM audio WHERE text = ? ORDER BY RANDOM() LIMIT 1`).get(clean) as
-    | { mime: string; data: Buffer }
-    | undefined;
+  // A stored recording: the pinned one, else one of the most preferred voice
+  // (a different one each time among equally preferred voices).
+  const cached = voice.db
+    .prepare(`SELECT mime, data FROM audio WHERE text = ? ORDER BY pinned DESC, ${rankSql('voice')}, RANDOM() LIMIT 1`)
+    .get(clean, preferredVoices(target)) as { mime: string; data: Buffer } | undefined;
   if (cached) return cached;
   if (!generate || !ttsGenerates(settings)) return null;
   const audio = await synthesize(clean, voice, settings);
-  voice.db
-    .prepare(`INSERT OR REPLACE INTO audio (text, voice, mime, data, created_at) VALUES (?, ?, ?, ?, ?)`)
-    .run(clean, audio.key ?? key, audio.mime, audio.data, Date.now());
+  storeRecording(voice.db, clean, audio.key ?? key, audio);
   return { data: audio.data, mime: audio.mime };
+}
+
+// The preferred voices of a language (English audio has none: pinned, then any).
+function preferredVoices(target: string): string {
+  return target === 'english' ? '[]' : preferenceJson(languageDb(target), 'audio');
+}
+
+// Stores a recording; a new recording by the same voice replaces the old one
+// (keeping its pin).
+function storeRecording(db: DB, text: string, voice: string, audio: { mime: string; data: Buffer }): number {
+  db.prepare(
+    `INSERT INTO audio (text, voice, mime, data, created_at) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(text, voice) DO UPDATE SET mime = excluded.mime, data = excluded.data, created_at = excluded.created_at`
+  ).run(text, voice, audio.mime, audio.data, Date.now());
+  return (db.prepare(`SELECT id FROM audio WHERE text = ? AND voice = ?`).get(text, voice) as { id: number }).id;
+}
+
+// The recording always played for its text (or none: the preferred voices decide).
+export function pinRecording(target: string, id: number, pinned: boolean): boolean {
+  const db = recordingsDb(target);
+  const row = db.prepare(`SELECT text FROM audio WHERE id = ?`).get(id) as { text: string } | undefined;
+  if (!row) return false;
+  db.transaction(() => {
+    db.prepare(`UPDATE audio SET pinned = 0 WHERE text = ?`).run(row.text);
+    if (pinned) db.prepare(`UPDATE audio SET pinned = 1 WHERE id = ?`).run(id);
+  })();
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -220,10 +248,9 @@ export async function addRecording(target: string, text: string, options: { prov
   if (!clean) throw new HttpError(400, 'Nothing to record');
   const audio = await synthesize(clean, voice, effective);
   const key = audio.key ?? voiceKey(effective, voice);
-  const now = Date.now();
-  voice.db.prepare(`INSERT OR REPLACE INTO audio (text, voice, mime, data, created_at) VALUES (?, ?, ?, ?, ?)`).run(clean, key, audio.mime, audio.data, now);
-  const row = voice.db.prepare(`SELECT id FROM audio WHERE text = ? AND voice = ?`).get(clean, key) as { id: number };
-  return { id: row.id, voice: key, createdAt: now };
+  const id = storeRecording(voice.db, clean, key, audio);
+  const row = voice.db.prepare(`SELECT created_at AS createdAt, pinned FROM audio WHERE id = ?`).get(id) as { createdAt: number; pinned: number };
+  return { id, voice: key, createdAt: row.createdAt, pinned: row.pinned === 1 };
 }
 
 // Speaks a text in any locale with the configured voice service (or another
@@ -316,24 +343,36 @@ function hasAudio(db: DB, text: string): boolean {
   return Boolean(db.prepare(`SELECT 1 FROM audio WHERE text = ? LIMIT 1`).get(audioText(text)));
 }
 
-// Pre-generates audio for the most frequent words (foreign + English) and the
-// easiest sentences so practice works offline and without delays.
+// Pre-generates audio so practice works offline and without delays: the next
+// words (most frequent first) and sentences (easiest first) that need a
+// recording by the policy, and the English of these and of the most frequent
+// words and easiest sentences, when it has none. With `replace`, the other
+// recordings of a text are removed once the new one is stored (pinned
+// recordings stay).
 export async function pregenerateAudio(
   langId: string,
-  options: { words: number; sentences: number; wordIds?: number[] },
+  options: { words: number; sentences: number; wordIds?: number[]; policy?: RegeneratePolicy },
   ctx: JobContext
 ): Promise<string> {
   const settings = getSettings();
   if (!ttsGenerates(settings)) {
     throw new HttpError(400, 'Audio is played by the browser (on device). Choose an API or Colab voice to pre-generate audio.');
   }
+  const policy = options.policy ?? ONLY_MISSING;
   const db = languageDb(langId);
   const english = englishDatabase();
+  const recorded =
+    policy.mode === 'missing'
+      ? (column: string) => `EXISTS (SELECT 1 FROM audio a WHERE a.text = ${column})`
+      : (column: string) => `EXISTS (SELECT 1 FROM audio a WHERE a.text = ${column} AND a.voice IN (SELECT value FROM json_each(?)))`;
+  const keep = policy.mode === 'missing' ? [] : [JSON.stringify(policy.keep)];
   const ids = options.wordIds ? JSON.stringify(options.wordIds) : null;
   const words = (
     ids
       ? db.prepare(`SELECT display, english FROM words WHERE id IN (SELECT value FROM json_each(?)) ORDER BY rank`).all(ids)
-      : db.prepare(`SELECT display, english FROM words WHERE active = 1 AND rank IS NOT NULL ORDER BY rank LIMIT ?`).all(options.words)
+      : db
+          .prepare(`SELECT display, english FROM words WHERE ${ACTIVE_WORDS} AND NOT ${recorded('words.display')} ORDER BY rank LIMIT ?`)
+          .all(...keep, options.words)
   ) as { display: string; english: string | null }[];
   const sentences = (
     ids
@@ -347,19 +386,40 @@ export async function pregenerateAudio(
           .all(ids, options.sentences)
       : db
           .prepare(
-            `SELECT text, english FROM sentences WHERE max_rank IS NOT NULL AND excluded_reason IS NULL ORDER BY max_rank, word_count LIMIT ?`
+            `SELECT text, english FROM sentences WHERE ${SENTENCES_IN_USE} AND excluded_reason IS NULL AND NOT ${recorded('sentences.text')}
+             ORDER BY max_rank, word_count LIMIT ?`
           )
-          .all(options.sentences)
+          .all(...keep, options.sentences)
   ) as { text: string; english: string | null }[];
+  // English: the main meaning of the words and the main translation of the
+  // sentences, also of the most frequent words and easiest sentences that
+  // already have their recording (e.g. after the main meaning changed).
+  const englishTexts = new Set<string>([
+    ...words.map((word) => parseEnglish(word.english)[0]),
+    ...sentences.map((sentence) => sentence.english),
+  ].filter((text): text is string => Boolean(text)));
+  if (!ids) {
+    for (const row of db.prepare(`SELECT english FROM words WHERE ${ACTIVE_WORDS} ORDER BY rank LIMIT ?`).all(options.words) as { english: string | null }[]) {
+      const gloss = parseEnglish(row.english)[0];
+      if (gloss) englishTexts.add(gloss);
+    }
+    for (const row of db
+      .prepare(
+        `SELECT english FROM sentences WHERE ${SENTENCES_IN_USE} AND excluded_reason IS NULL AND english IS NOT NULL ORDER BY max_rank, word_count LIMIT ?`
+      )
+      .all(options.sentences) as { english: string }[]) {
+      englishTexts.add(row.english);
+    }
+  }
   const tasks: { target: string; text: string }[] = [];
   for (const word of words) {
-    if (!hasAudio(db, word.display)) tasks.push({ target: langId, text: word.display });
-    const gloss = parseEnglish(word.english)[0];
-    if (gloss && !hasAudio(english, gloss)) tasks.push({ target: 'english', text: gloss });
+    if (audioNeeded(db, word.display, policy)) tasks.push({ target: langId, text: word.display });
   }
   for (const sentence of sentences) {
-    if (!hasAudio(db, sentence.text)) tasks.push({ target: langId, text: sentence.text });
-    if (sentence.english && !hasAudio(english, sentence.english)) tasks.push({ target: 'english', text: sentence.english });
+    if (audioNeeded(db, sentence.text, policy)) tasks.push({ target: langId, text: sentence.text });
+  }
+  for (const text of englishTexts) {
+    if (!hasAudio(english, text)) tasks.push({ target: 'english', text });
   }
   if (tasks.length === 0) return 'All audio is already generated';
   let done = 0;
@@ -368,7 +428,14 @@ export async function pregenerateAudio(
     ctx.checkCancelled();
     ctx.progress(done, tasks.length, `Generating audio (${done}/${tasks.length})…`);
     try {
-      await getAudio(task.target, task.text, true);
+      if (task.target === 'english') await getAudio(task.target, task.text, true);
+      else {
+        // A new recording by the configured voice, even when the text has others.
+        const recording = await addRecording(task.target, task.text, {});
+        if (policy.replace) {
+          db.prepare(`DELETE FROM audio WHERE text = ? AND voice != ? AND pinned = 0`).run(audioText(task.text), recording.voice);
+        }
+      }
     } catch (error) {
       failures.push((error as Error).message);
       if (failures.length >= 5 && failures.length === done + 1) throw new Error(`Audio generation failed: ${failures[0]}`);
@@ -378,9 +445,6 @@ export async function pregenerateAudio(
   ctx.progress(done, tasks.length);
   return `Generated ${done - failures.length} audio clips${failures.length ? ` (${failures.length} failed: ${failures[0]})` : ''}`;
 }
-
-// ---------------------------------------------------------------------------
-// Speech to text (Whisper-compatible /audio/transcriptions endpoint).
 
 function multipart(fields: Record<string, string>, file: { name: string; mime: string; data: Buffer }) {
   const boundary = `----lang${randomUUID().replace(/-/g, '')}`;

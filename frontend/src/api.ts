@@ -25,12 +25,18 @@ import type {
   Paged,
   ProgressSummary,
   Recording,
+  RegeneratePolicy,
   ResultsResponse,
   SentenceExclusion,
   SentenceRow,
+  SourceInventory,
+  SourcePreferences,
   SourceRow,
+  SourcedKind,
   TranslationProvider,
   TtsProvider,
+  ValueChange,
+  WordDetails,
   WordResult,
   WordRow,
 } from '../../shared/types';
@@ -88,6 +94,16 @@ function query(params: Record<string, string | number | boolean | undefined>): s
 
 const L = (id: string) => `/languages/${encodeURIComponent(id)}`;
 
+// One change to a meaning, pronunciation or translation (see ValueChange).
+function changeValue<T>(base: string, change: ValueChange): Promise<T> {
+  if ('add' in change) return post<T>(base, { text: change.add });
+  if ('edit' in change) return put<T>(`${base}/${change.edit}`, { text: change.text });
+  if ('remove' in change) return del<T>(`${base}/${change.remove}`);
+  return post<T>(`${base}/${change.pin}/pin`, { pinned: change.pinned });
+}
+
+export type DefinitionService = 'wiktionary' | 'llm';
+
 export const api = {
   // Languages
   languages: () => get<LanguageSummary[]>('/languages'),
@@ -118,10 +134,18 @@ export const api = {
     patch: { english?: string[]; pronunciation?: string | null; pos?: string | null; excluded?: boolean | null }
   ) => put<WordRow>(`${L(id)}/words/${wordId}`, patch),
   resetWord: (id: string, wordId: number) => post<WordRow>(`${L(id)}/words/${wordId}/reset`),
-  sentences: (id: string, params: { offset: number; limit: number; q?: string; filter?: string; word?: number }) =>
+  wordDetails: (id: string, wordId: number) => get<WordDetails>(`${L(id)}/words/${wordId}/details`),
+  changeMeaning: (id: string, wordId: number, change: ValueChange) => changeValue<WordDetails>(`${L(id)}/words/${wordId}/meanings`, change),
+  changePronunciation: (id: string, wordId: number, change: ValueChange) =>
+    changeValue<WordDetails>(`${L(id)}/words/${wordId}/pronunciations`, change),
+  // Meanings or pronunciation of one word again, from a chosen service.
+  fetchWord: (id: string, wordId: number, body: { what: 'meanings' | 'pronunciations'; provider?: DefinitionService; replace?: boolean }) =>
+    post<{ message: string; details: WordDetails }>(`${L(id)}/words/${wordId}/fetch`, body),
+  sentences: (id: string, params: { offset: number; limit: number; q?: string; filter?: string; word?: number; source?: number }) =>
     get<Paged<SentenceRow>>(`${L(id)}/sentences${query(params)}`),
-  updateSentence: (id: string, sentenceId: number, english: string | null) =>
-    put<{ ok: true }>(`${L(id)}/sentences/${sentenceId}`, { english }),
+  sentence: (id: string, sentenceId: number) => get<SentenceRow>(`${L(id)}/sentences/${sentenceId}`),
+  changeTranslation: (id: string, sentenceId: number, change: ValueChange) =>
+    changeValue<SentenceRow>(`${L(id)}/sentences/${sentenceId}/translations`, change),
   deleteSentence: (id: string, sentenceId: number) => del<{ ok: true }>(`${L(id)}/sentences/${sentenceId}`),
   excludeSentence: (id: string, sentenceId: number, reason: SentenceExclusion, undoId?: string) =>
     post<{ ok: true; undone: boolean }>(`${L(id)}/sentences/${sentenceId}/exclude`, { reason, undoId }),
@@ -138,11 +162,21 @@ export const api = {
     post<{ ok: boolean; message: string }>('/services/test', { service, lang }),
   jobs: (lang?: string) => get<JobInfo[]>(`/jobs${query({ lang })}`),
   cancelJob: (jobId: string) => post<{ cancelled: boolean }>(`/jobs/${jobId}/cancel`),
-  fetchDefinitions: (id: string, limit: number, overwrite = false) => post<JobInfo>(`${L(id)}/definitions`, { limit, overwrite }),
-  translateSentences: (id: string, limit: number) => post<JobInfo>(`${L(id)}/translations`, { limit }),
+  fetchDefinitions: (id: string, body: { limit: number; policy?: RegeneratePolicy; provider?: DefinitionService }) =>
+    post<JobInfo>(`${L(id)}/definitions`, body),
+  fetchPronunciations: (id: string, body: { limit: number; policy?: RegeneratePolicy; provider?: DefinitionService }) =>
+    post<JobInfo>(`${L(id)}/pronunciations`, body),
+  translateSentences: (id: string, body: { limit: number; policy?: RegeneratePolicy; provider?: TranslationProvider }) =>
+    post<JobInfo>(`${L(id)}/translations`, body),
   generateSentences: (id: string, limit: number, minSentences: number) =>
     post<JobInfo>(`${L(id)}/generate-sentences`, { limit, minSentences }),
-  generateAudio: (id: string, words: number, sentences: number) => post<JobInfo>(`${L(id)}/audio`, { words, sentences }),
+  generateAudio: (id: string, body: { words: number; sentences: number; policy?: RegeneratePolicy }) => post<JobInfo>(`${L(id)}/audio`, body),
+  // Where each kind of data comes from, which sources are preferred, and how
+  // many words or sentences a job with a policy would work on.
+  sourceInventory: (id: string) => get<SourceInventory>(`${L(id)}/source-inventory`),
+  saveSourcePreferences: (id: string, preferences: Partial<SourcePreferences>) => put<LanguageSummary>(`${L(id)}/source-preferences`, preferences),
+  regenerateCount: (id: string, kind: SourcedKind, policy: RegeneratePolicy) =>
+    get<{ count: number }>(`${L(id)}/regenerate-count${query({ kind, mode: policy.mode, keep: policy.keep.join('\n') })}`),
   suggestImages: (id: string, words: number, perWord: number) => post<JobInfo>(`${L(id)}/images/suggest`, { words, perWord }),
   prepare: (id: string) => post<JobInfo | null>(`${L(id)}/prepare`),
   autopilot: (id: string, words: number) => post<JobInfo>(`${L(id)}/autopilot`, { words }),
@@ -168,6 +202,7 @@ export const api = {
   recordings: (target: string, text: string) => get<Recording[]>(`/recordings${query({ lang: target, text })}`),
   recordingUrl: (target: string, id: number) => `/api/recordings/${encodeURIComponent(target)}/${id}`,
   deleteRecording: (target: string, id: number) => del<{ deleted: boolean }>(`/recordings/${encodeURIComponent(target)}/${id}`),
+  pinRecording: (target: string, id: number, pinned: boolean) => post<{ ok: true }>(`/recordings/${encodeURIComponent(target)}/${id}/pin`, { pinned }),
   addRecording: (target: string, text: string, options: { provider?: TtsProvider; voice?: string } = {}) =>
     post<Recording>('/recordings', { lang: target, text, ...options }),
   transcribe: (target: string, audio: Blob) =>

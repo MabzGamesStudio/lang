@@ -8,8 +8,9 @@ import { recomputeRanks, refreshSentenceCounts, wordIdsOfSentences } from '../se
 import { wordIdFor } from '../services/corpus.js';
 import { tokenize, tidySentence } from '../services/textProcessing.js';
 import type { JobContext } from '../services/jobs.js';
+import { ONLY_MISSING, SENTENCES_IN_USE, sentencesNeeding } from '../services/regenerate.js';
 import { chat, extractItems, llmAvailable, llmLabel } from './llm.js';
-import type { LanguageConfig, TranslationProvider } from '../../../shared/types.js';
+import type { LanguageConfig, RegeneratePolicy, TranslationProvider } from '../../../shared/types.js';
 
 interface SentenceToTranslate {
   id: number;
@@ -21,8 +22,18 @@ interface SentenceToTranslate {
 // whose rarest word is not far beyond the word itself.
 export function sentencesNeedingTranslation(
   db: DB,
-  options: { limit?: number; wordIds?: number[]; perWord?: number }
+  options: { limit?: number; wordIds?: number[]; perWord?: number; sentenceIds?: number[]; policy?: RegeneratePolicy }
 ): SentenceToTranslate[] {
+  if (options.sentenceIds || options.policy) {
+    const condition = sentencesNeeding(options.policy ?? ONLY_MISSING);
+    return options.sentenceIds
+      ? (db
+          .prepare(`SELECT id, text FROM sentences WHERE id IN (SELECT value FROM json_each(?)) AND ${condition.sql}`)
+          .all(JSON.stringify(options.sentenceIds), ...condition.params) as SentenceToTranslate[])
+      : (db
+          .prepare(`SELECT id, text FROM sentences WHERE ${SENTENCES_IN_USE} AND ${condition.sql} ORDER BY max_rank, word_count LIMIT ?`)
+          .all(...condition.params, options.limit ?? 100) as SentenceToTranslate[]);
+  }
   if (options.wordIds) {
     const perWord = options.perWord ?? 4;
     const statement = db.prepare(
@@ -157,19 +168,27 @@ export function translationAvailable(provider: TranslationProvider = getSettings
 
 export async function translateSentences(
   langId: string,
-  options: { limit?: number; wordIds?: number[]; perWord?: number },
+  options: {
+    limit?: number;
+    wordIds?: number[];
+    perWord?: number;
+    sentenceIds?: number[];
+    policy?: RegeneratePolicy;
+    provider?: TranslationProvider;
+  },
   ctx?: JobContext
 ): Promise<string> {
   const db = languageDb(langId);
   const config = getLanguageConfig(db);
   const settings = getSettings();
-  if (!translationAvailable()) {
+  const provider = options.provider ?? settings.translation.provider;
+  if (!translationAvailable(provider)) {
     throw new HttpError(400, 'Sentence translation is not configured. Set it up in Configuration → Services.');
   }
   const sentences = sentencesNeedingTranslation(db, options);
   if (sentences.length === 0) return 'No sentences need translating';
-  const batchSize = Math.max(1, settings.translation.provider === 'llm' ? settings.translation.batchSize : 40);
-  const label = translationLabel();
+  const batchSize = Math.max(1, provider === 'llm' ? settings.translation.batchSize : 40);
+  const label = translationLabel(provider);
   let saved = 0;
   const failures: string[] = [];
   for (let start = 0; start < sentences.length; start += batchSize) {
@@ -177,11 +196,12 @@ export async function translateSentences(
     ctx?.progress(start, sentences.length, `Translating sentences (${start}/${sentences.length})…`);
     const batch = sentences.slice(start, start + batchSize);
     try {
-      const translations = await translateBatch(batch, config);
+      const translations = await translateBatch(batch, config, provider);
       saved += saveSentenceTranslations(
         db,
         [...translations.entries()].map(([id, english]) => ({ id, english })),
-        label
+        label,
+        { replace: options.policy?.replace }
       );
     } catch (error) {
       failures.push((error as Error).message);
@@ -357,6 +377,7 @@ Target words: ${JSON.stringify(batch.map((t) => t.word))}`,
           const result = insertSentence.run(text, sourceId, tokens.length);
           if (!result.changes) continue;
           const sentenceId = Number(result.lastInsertRowid);
+          db.prepare(`INSERT OR IGNORE INTO sentence_sources (sentence_id, source_id) VALUES (?, ?)`).run(sentenceId, sourceId);
           translations.push({ id: sentenceId, english: item.english });
           tokens.forEach((token, position) => insertWord.run(sentenceId, position, wordIdFor(db, token.word, config.locale)));
           sentenceIds.push(sentenceId);

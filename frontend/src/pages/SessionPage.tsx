@@ -81,7 +81,7 @@ function MissingDefinitions({
         <button
           className="button"
           onClick={async () => {
-            const job = await run(() => api.fetchDefinitions(langId, 98));
+            const job = await run(() => api.fetchDefinitions(langId, { limit: 98 }));
             trackJob(job);
           }}
         >

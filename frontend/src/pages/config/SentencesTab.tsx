@@ -4,49 +4,37 @@ import { api } from '../../api';
 import { useAction, useApp } from '../../state/AppContext';
 import { useDebounced } from '../../lib/hooks';
 import { playText } from '../../lib/audio';
-import { TRANSLATION_SERVICES, VOICE_SERVICES, translationSourceLabel, voiceLabel } from '../../lib/sourceLabels';
+import { ORIGIN_KINDS, TRANSLATION_SERVICES, VOICE_SERVICES, translationSourceLabel, voiceLabel } from '../../lib/sourceLabels';
 import { EXCLUSION_LABELS } from '../../components/minigame/ReportMenu';
 import { voiceFor } from '../../components/minigame/PromptView';
 import JobsPanel from '../../components/JobsPanel';
 import Recordings from '../../components/Recordings';
+import SourcedValues from '../../components/SourcedValues';
+import SourcePreferences from './SourcePreferences';
 import { Pager } from './WordsTab';
 import { Field, Section, TextInput } from './fields';
-import type { LanguageSummary, Paged, SentenceExclusion, SentenceRow, TranslationProvider, TtsProvider } from '../../../../shared/types';
+import type { LanguageSummary, Paged, SentenceExclusion, SentenceRow, SourceRow, TranslationProvider, TtsProvider, ValueChange } from '../../../../shared/types';
 
 const REASONS = Object.keys(EXCLUSION_LABELS) as SentenceExclusion[];
 
-// All translations of a sentence, separated by semicolons (the first is the
-// main one). Each keeps its source; new or edited ones are "typed by you".
-function TranslationCell({ langId, sentence, onSaved }: { langId: string; sentence: SentenceRow; onSaved: () => void }) {
+// All translations of a sentence, each with its source: the first one is
+// shown in questions (a pinned one, else the preferred source decides), the
+// others are accepted as answers too. Edited or added ones are "typed by you".
+function TranslationCell({ langId, sentence, onSaved }: { langId: string; sentence: SentenceRow; onSaved: (sentence: SentenceRow) => void }) {
   const run = useAction();
-  const joined = sentence.translations.map((translation) => translation.english).join('; ');
-  const [value, setValue] = useState(joined);
-  useEffect(() => setValue(joined), [joined]);
+  const change = async (value: ValueChange) => {
+    const saved = await run(() => api.changeTranslation(langId, sentence.id, value));
+    if (saved) onSaved(saved);
+    return Boolean(saved);
+  };
   return (
-    <>
-      <textarea
-        rows={1}
-        value={value}
-        placeholder="Add a translation (several: separate them with ;)"
-        title="Several translations: separate them with semicolons. The first one is shown in questions."
-        onChange={(event) => setValue(event.target.value)}
-        onBlur={async () => {
-          if (joined === value.trim()) return;
-          const ok = await run(() => api.updateSentence(langId, sentence.id, value.trim() || null));
-          if (ok) onSaved();
-        }}
-      />
-      {sentence.translations.length > 0 && (
-        <div className="origin muted">
-          {sentence.translations.map((translation, index) => (
-            <span key={translation.id} className="sourced" title={translation.english}>
-              {sentence.translations.length > 1 ? `${index + 1}: ` : 'Translation: '}
-              {translationSourceLabel(translation.source)}
-            </span>
-          ))}
-        </div>
-      )}
-    </>
+    <SourcedValues
+      values={sentence.translations.map((translation) => ({ ...translation, text: translation.english }))}
+      label={translationSourceLabel}
+      usedLabel="shown in questions"
+      addPlaceholder={sentence.translations.length ? 'Add another translation' : 'Add a translation'}
+      onChange={change}
+    />
   );
 }
 
@@ -166,9 +154,15 @@ export default function SentencesTab({ language }: { language: LanguageSummary }
   const run = useAction();
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('all');
+  // Only the sentences found in one text.
+  const [text, setText] = useState(0);
+  const [texts, setTexts] = useState<SourceRow[]>([]);
   const [offset, setOffset] = useState(0);
   const [data, setData] = useState<Paged<SentenceRow>>({ rows: [], total: 0 });
   const [changes, setChanges] = useState(0);
+  // Translations changed in place (the counts of their sources change).
+  const [edits, setEdits] = useState(0);
+  const [preferences, setPreferences] = useState(0);
   // The configured services, or the first one that is set up.
   const [options, setOptions] = useState<FixOptions>(() => ({
     translator: settings?.translation.provider ?? 'llm',
@@ -185,11 +179,17 @@ export default function SentencesTab({ language }: { language: LanguageSummary }
 
   useEffect(() => {
     api
-      .sentences(language.id, { offset, limit: 50, q, filter })
+      .sentences(language.id, { offset, limit: 50, q, filter, source: text || undefined })
       .then(setData)
       .catch(() => undefined);
-  }, [language.id, offset, q, filter, fixing, changes]);
-  useEffect(() => setOffset(0), [q, filter]);
+  }, [language.id, offset, q, filter, text, fixing, changes, preferences]);
+  useEffect(() => setOffset(0), [q, filter, text]);
+  useEffect(() => {
+    api
+      .sources(language.id)
+      .then((sources) => setTexts(sources.filter((source) => source.sentenceCount > 0)))
+      .catch(() => undefined);
+  }, [language.id]);
 
   const [open, setOpen] = useState<Set<number>>(new Set());
   const toggle = (id: number) =>
@@ -215,13 +215,28 @@ export default function SentencesTab({ language }: { language: LanguageSummary }
   return (
     <>
       <ReportedSentences language={language} options={options} setOptions={setOptions} refreshKey={`${changes}:${fixing}`} />
+      <SourcePreferences
+        language={language}
+        kinds={['sentences', 'translations', 'audio']}
+        refreshKey={`${changes}:${fixing}:${edits}`}
+        onSaved={() => setPreferences((n) => n + 1)}
+      />
       <div className="card">
         <p className="muted">
-          Sentences are ordered by difficulty: the rank of their rarest word. Edit a translation by clicking on it. Under each sentence: where its
-          audio and translation came from.
+          Sentences are ordered by difficulty: the rank of their rarest word. Under each sentence: every text it was found in and where its audio
+          came from (<Mic size={12} /> for its recordings). Each translation shows its source: pin the one to show in questions (★), edit, add or
+          delete them.
         </p>
         <div className="toolbar">
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search sentences" />
+          <select value={text} onChange={(event) => setText(Number(event.target.value))} title="Only the sentences found in one text">
+            <option value={0}>All texts</option>
+            {texts.map((source) => (
+              <option key={source.id} value={source.id}>
+                {source.title} ({ORIGIN_KINDS[source.kind] ?? source.kind}, {source.sentenceCount.toLocaleString()})
+              </option>
+            ))}
+          </select>
           <select value={filter} onChange={(event) => setFilter(event.target.value)}>
             <option value="all">All</option>
             <option value="untranslated">Not translated</option>
@@ -261,9 +276,24 @@ export default function SentencesTab({ language }: { language: LanguageSummary }
                     {sentence.text}
                   </div>
                   <div className="origin muted">
-                    From: {sentence.sourceTitle ?? 'unknown'} · Audio:{' '}
+                    From:{' '}
+                    {sentence.origins.length
+                      ? sentence.origins.map((origin, index) => (
+                          <span key={origin.id}>
+                            {index > 0 && ', '}
+                            <button
+                              className="link-button"
+                              title={`${ORIGIN_KINDS[origin.kind] ?? origin.kind} — show only the sentences of this text`}
+                              onClick={() => setText(origin.id)}
+                            >
+                              {origin.title}
+                            </button>
+                          </span>
+                        ))
+                      : (sentence.sourceTitle ?? 'unknown')}{' '}
+                    · Audio:{' '}
                     {sentence.audio.length
-                      ? sentence.audio.map((recording) => voiceLabel(recording.voice)).join(', ')
+                      ? sentence.audio.map((recording) => `${voiceLabel(recording.voice)}${recording.pinned ? ' ★' : ''}`).join(', ')
                       : settings?.tts.provider === 'browser'
                         ? 'voice of this device (not stored)'
                         : 'not generated yet'}
@@ -276,15 +306,23 @@ export default function SentencesTab({ language }: { language: LanguageSummary }
                       </div>
                       {sentence.english && (
                         <div>
-                          <span className="muted">Recordings of the translation “{sentence.english}”</span>
+                          <span className="muted">Recordings of the translation shown in questions, “{sentence.english}”</span>
                           <Recordings target="english" text={sentence.english} initial={sentence.englishAudio} />
                         </div>
                       )}
+                      <span className="muted">A pinned recording (★) is always played; otherwise one of a preferred voice, else one at random.</span>
                     </div>
                   )}
                 </td>
                 <td>
-                  <TranslationCell langId={language.id} sentence={sentence} onSaved={() => setChanges((n) => n + 1)} />
+                  <TranslationCell
+                    langId={language.id}
+                    sentence={sentence}
+                    onSaved={(saved) => {
+                      updateRow(sentence.id, saved);
+                      setEdits((n) => n + 1);
+                    }}
+                  />
                 </td>
                 <td>
                   <select className={sentence.excludedReason ? 'status-excluded' : ''} value={sentence.excludedReason ?? ''} onChange={(event) => void setStatus(sentence, event.target.value)}>
@@ -313,7 +351,7 @@ export default function SentencesTab({ language }: { language: LanguageSummary }
                   </button>
                   <button
                     className="icon-button"
-                    title="Regenerate the audio"
+                    title="Regenerate the audio (replaces its recordings, pinned ones too)"
                     onClick={async () =>
                       trackJob(
                         await run(() =>

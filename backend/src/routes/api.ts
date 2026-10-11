@@ -29,6 +29,11 @@ import {
   listSentences,
   listWords,
   recordingsOf,
+  changeMeaning,
+  changePronunciation,
+  changeTranslation,
+  getSentence,
+  wordDetails,
   SENTENCE_EXCLUSIONS,
   setSentenceExclusion,
   resetWordProgress,
@@ -63,7 +68,9 @@ import { exportEnglish, exportLanguage, importEnglish, importLanguage } from '..
 import { inputIndex } from '../services/inputIndex.js';
 import { listHubBackups, restoreFromHub, uploadToHub } from '../services/huggingface.js';
 import { importLegacy, legacyAlreadyImported, legacyAvailable } from '../services/legacy.js';
-import { fetchDefinitions } from '../providers/definitions.js';
+import { fetchDefinitions, fetchPronunciations } from '../providers/definitions.js';
+import { ALWAYS, cleanPolicy, countNeeding, saveSourcePreferences, sourceInventory } from '../services/regenerate.js';
+import { preferenceJson } from '../services/sourced.js';
 import {
   generateSentences,
   retranslateSentences,
@@ -76,6 +83,7 @@ import {
   addRecording,
   deleteRecording,
   getAudio,
+  pinRecording,
   pregenerateAudio,
   recordingFile,
   regenerateSentenceAudio,
@@ -88,7 +96,7 @@ import { applyIpaResults, ipaProgressSummary, ipaSessionNext, resetIpaProgress }
 import { isIpaGameId, type IpaResult, type IpaScope } from '../../../shared/ipa/games.js';
 import { chat, judgeTranslation, llmAvailable } from '../providers/llm.js';
 import { PHASES, isGameId, type GameId } from '../../../shared/games.js';
-import type { SentenceExclusion, TranslationProvider, TtsProvider, WordResult } from '../../../shared/types.js';
+import type { SentenceExclusion, TranslationProvider, TtsProvider, ValueChange, WordResult } from '../../../shared/types.js';
 
 const TRANSLATION_PROVIDERS: TranslationProvider[] = ['llm', 'deepl', 'google', 'libretranslate'];
 const TTS_PROVIDERS: TtsProvider[] = ['colab', 'openai', 'google', 'azure', 'elevenlabs'];
@@ -228,7 +236,10 @@ export function apiRouter(): Router {
   api.put('/languages/:lang', (req, res) => {
     const id = lang(req);
     const before = getLanguageConfig(languageDb(id));
-    const summary = updateLanguage(id, req.body ?? {});
+    // Preferred sources have their own route (the values used follow them).
+    const { sourcePreferences: _ignored, ...patch } = (req.body ?? {}) as Record<string, unknown>;
+    void _ignored;
+    const summary = updateLanguage(id, patch);
     if (before.detectProperNouns !== summary.detectProperNouns || before.sourceWeighting !== summary.sourceWeighting) {
       rebuildStatistics(id);
     }
@@ -339,6 +350,45 @@ export function apiRouter(): Router {
     res.json(getWord(lang(req), intParam(req.params.word, 0)));
   });
 
+  // Everything about a word with its sources, and changes to one value.
+  api.get('/languages/:lang/words/:word/details', (req, res) => {
+    res.json(wordDetails(lang(req), intParam(req.params.word, 0)));
+  });
+
+  const valueChange = (req: Request): ValueChange => {
+    const body = req.body ?? {};
+    const id = intParam(req.params.value, 0);
+    if (req.method === 'POST' && !req.params.value) return { add: str(body.text) };
+    if (req.method === 'DELETE') return { remove: id };
+    if (req.path.endsWith('/pin')) return { pin: id, pinned: body.pinned !== false };
+    return { edit: id, text: str(body.text) };
+  };
+  for (const kind of ['meanings', 'pronunciations'] as const) {
+    const change = kind === 'meanings' ? changeMeaning : changePronunciation;
+    const handler = (req: Request, res: Response) => {
+      const value = valueChange(req);
+      if ('add' in value && !value.add.trim()) throw new HttpError(400, 'Nothing to add');
+      res.json(change(lang(req), intParam(req.params.word, 0), value));
+    };
+    api.post(`/languages/:lang/words/:word/${kind}`, handler);
+    api.put(`/languages/:lang/words/:word/${kind}/:value`, handler);
+    api.delete(`/languages/:lang/words/:word/${kind}/:value`, handler);
+    api.post(`/languages/:lang/words/:word/${kind}/:value/pin`, handler);
+  }
+
+  // Meanings or pronunciation of one word again, from a chosen service.
+  api.post('/languages/:lang/words/:word/fetch', async (req, res) => {
+    const id = lang(req);
+    const wordId = intParam(req.params.word, 0);
+    const provider = req.body?.provider === 'llm' ? 'llm' : req.body?.provider === 'wiktionary' ? 'wiktionary' : undefined;
+    const policy = { ...ALWAYS, replace: req.body?.replace === true };
+    const message =
+      req.body?.what === 'pronunciations'
+        ? await fetchPronunciations(id, { wordIds: [wordId], policy, provider })
+        : await fetchDefinitions(id, { wordIds: [wordId], policy, provider });
+    res.json({ message, details: wordDetails(id, wordId) });
+  });
+
   api.put('/languages/:lang/words/:word', (req, res) => {
     const body = req.body ?? {};
     res.json(
@@ -363,9 +413,27 @@ export function apiRouter(): Router {
         q: str(req.query.q),
         filter: str(req.query.filter),
         wordId: req.query.word ? intParam(req.query.word, 0) : undefined,
+        sourceId: req.query.source ? intParam(req.query.source, 0) : undefined,
       })
     );
   });
+
+  api.get('/languages/:lang/sentences/:sentence', (req, res) => {
+    res.json(getSentence(lang(req), intParam(req.params.sentence, 0)));
+  });
+
+  // One translation of a sentence: add, edit (it becomes yours), delete, pin.
+  {
+    const handler = (req: Request, res: Response) => {
+      const value = valueChange(req);
+      if ('add' in value && !value.add.trim()) throw new HttpError(400, 'Nothing to add');
+      res.json(changeTranslation(lang(req), intParam(req.params.sentence, 0), value));
+    };
+    api.post('/languages/:lang/sentences/:sentence/translations', handler);
+    api.put('/languages/:lang/sentences/:sentence/translations/:value', handler);
+    api.delete('/languages/:lang/sentences/:sentence/translations/:value', handler);
+    api.post('/languages/:lang/sentences/:sentence/translations/:value/pin', handler);
+  }
 
   api.put('/languages/:lang/sentences/:sentence', (req, res) => {
     updateSentence(lang(req), intParam(req.params.sentence, 0), {
@@ -425,17 +493,54 @@ export function apiRouter(): Router {
   // -------------------------------------------------------------------------
   // Automation jobs
 
+  // Which words or sentences a job works on: by the sources of what they
+  // already have (see RegeneratePolicy).
+  const definitionProvider = (value: unknown) => (value === 'llm' ? 'llm' : value === 'wiktionary' ? 'wiktionary' : undefined);
+
   api.post('/languages/:lang/definitions', (req, res) => {
     const id = lang(req);
     const limit = intParam(req.body?.limit, 200, 1, 50_000);
     const overwrite = Boolean(req.body?.overwrite);
-    res.json(startJob(id, 'definitions', `Fetching definitions for ${limit} words`, (ctx) => fetchDefinitions(id, { limit, overwrite }, ctx)));
+    const policy = req.body?.policy ? cleanPolicy(req.body.policy) : undefined;
+    const provider = definitionProvider(req.body?.provider);
+    res.json(
+      startJob(id, 'definitions', `Fetching definitions for ${limit} words`, (ctx) => fetchDefinitions(id, { limit, overwrite, policy, provider }, ctx))
+    );
+  });
+
+  api.post('/languages/:lang/pronunciations', (req, res) => {
+    const id = lang(req);
+    const limit = intParam(req.body?.limit, 200, 1, 50_000);
+    const policy = cleanPolicy(req.body?.policy);
+    const provider = definitionProvider(req.body?.provider);
+    res.json(
+      startJob(id, 'pronunciations', `Fetching pronunciations for ${limit} words`, (ctx) => fetchPronunciations(id, { limit, policy, provider }, ctx))
+    );
   });
 
   api.post('/languages/:lang/translations', (req, res) => {
     const id = lang(req);
     const limit = intParam(req.body?.limit, 200, 1, 100_000);
-    res.json(startJob(id, 'translations', `Translating ${limit} sentences`, (ctx) => translateSentences(id, { limit }, ctx)));
+    const policy = req.body?.policy ? cleanPolicy(req.body.policy) : undefined;
+    const requested = str(req.body?.provider) as TranslationProvider;
+    const provider = TRANSLATION_PROVIDERS.includes(requested) ? requested : undefined;
+    res.json(startJob(id, 'translations', `Translating ${limit} sentences`, (ctx) => translateSentences(id, { limit, policy, provider }, ctx)));
+  });
+
+  api.get('/languages/:lang/source-inventory', (req, res) => {
+    res.json(sourceInventory(lang(req)));
+  });
+
+  api.get('/languages/:lang/regenerate-count', (req, res) => {
+    const kind = str(req.query.kind);
+    if (kind !== 'meanings' && kind !== 'pronunciations' && kind !== 'translations' && kind !== 'audio') throw new HttpError(400, 'Unknown kind');
+    const keep = str(req.query.keep);
+    const policy = cleanPolicy({ mode: str(req.query.mode), keep: keep ? keep.split('\n') : [], replace: false });
+    res.json({ count: countNeeding(lang(req), kind, policy) });
+  });
+
+  api.put('/languages/:lang/source-preferences', (req, res) => {
+    res.json(saveSourcePreferences(lang(req), req.body ?? {}));
   });
 
   api.post('/languages/:lang/generate-sentences', (req, res) => {
@@ -452,7 +557,8 @@ export function apiRouter(): Router {
     const id = lang(req);
     const words = intParam(req.body?.words, 200, 0, 50_000);
     const sentences = intParam(req.body?.sentences, 100, 0, 50_000);
-    res.json(startJob(id, 'audio', `Generating audio`, (ctx) => pregenerateAudio(id, { words, sentences }, ctx)));
+    const policy = cleanPolicy(req.body?.policy);
+    res.json(startJob(id, 'audio', `Generating audio`, (ctx) => pregenerateAudio(id, { words, sentences, policy }, ctx)));
   });
 
   api.post('/languages/:lang/images/suggest', (req, res) => {
@@ -663,7 +769,8 @@ export function apiRouter(): Router {
 
   api.get('/recordings', (req, res) => {
     const target = recordingTarget(req.query.lang);
-    res.json(recordingsOf(target === 'english' ? englishDatabase() : languageDb(target), str(req.query.text)));
+    if (target === 'english') res.json(recordingsOf(englishDatabase(), str(req.query.text)));
+    else res.json(recordingsOf(languageDb(target), str(req.query.text), preferenceJson(languageDb(target), 'audio')));
   });
 
   api.get('/recordings/:target/:id', (req, res) => {
@@ -676,6 +783,13 @@ export function apiRouter(): Router {
 
   api.delete('/recordings/:target/:id', (req, res) => {
     res.json({ deleted: deleteRecording(recordingTarget(req.params.target), intParam(req.params.id, 0)) });
+  });
+
+  // The recording always played for its text (pinned: false = the preferred voices decide).
+  api.post('/recordings/:target/:id/pin', (req, res) => {
+    const found = pinRecording(recordingTarget(req.params.target), intParam(req.params.id, 0), req.body?.pinned !== false);
+    if (!found) throw new HttpError(404, 'Recording not found');
+    res.json({ ok: true });
   });
 
   api.post('/recordings', async (req, res) => {

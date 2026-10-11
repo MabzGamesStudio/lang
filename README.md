@@ -10,7 +10,7 @@ An intense, efficient platform for learning the words of any language, from the 
 - **Forgiving checking** – synonyms, homographs, every word an image can stand for, missing accents, small typos, word-level closeness for sentences and a similarity score for speech. An answer accepted with a spelling slip stays on screen with the exact spelling highlighted.
 - **Any script** – type Chinese with pinyin, Japanese with romaji, Korean on a 2-set layout, Russian, Greek or Hindi with Latin letters, or click the letters on screen.
 - **Pronunciation mode** – a separate mode for the sounds of speech and their IPA symbols: hear each sound, pick or type its symbol, and read and write words in IPA, with recordings from Wikimedia Commons.
-- **Every source shown** – each word, meaning, sentence, translation and recording keeps where it came from: a book, a word list, a service, a voice or you.
+- **Every source shown** – each word, meaning, pronunciation, sentence, translation and recording keeps where it came from: a book, a word list, a service, a voice or you. Values from several sources are kept side by side: pin the one to use, rank the sources you prefer, and choose which ones the generation jobs redo.
 
 ## Quick start
 
@@ -113,7 +113,7 @@ The button next to the answer box switches between the input method and direct t
 - **Any URL, pasted text or text files.**
 - **Word lists (CSV)** – columns `word, english` plus optional `count`/`rank`, `pronunciation`, `pos`. Without counts, the row order is taken as frequency order.
 
-*Configuration → Words* shows where each word was found (the books and lists, with counts), each English meaning with its source (a word list, Wiktionary, a language model or you) and the stored recordings with their voices. A word can have several meanings and several recordings; the microphone button lists the recordings, plays or deletes them, and adds one with any voice service.
+*Configuration → Words* lists the words with the source of each meaning and pronunciation. Open a word to see everything about it, each part with where it came from: the books, texts and word lists it was found in (with counts), its English meanings and pronunciations (from a word list, Wiktionary, a language model, pinyin made offline, or you) and its recordings (with their voices). A word can have several of each: pin (★) the one to use, edit one (it becomes yours), add or delete them, play recordings or add one with any voice service, and get the meanings or the pronunciation again from Wiktionary or a language model — added to the others, or replacing the automatic ones. The same view opens from the pencil next to a word in the feedback of a question.
 
 Words are tokenised with `Intl.Segmenter`, so languages without spaces (Japanese, Chinese, Thai) work too. Word lists keep multi-character words such as 一模一样 whole. *Combine sources* decides how sources are mixed: by default each source contributes its frequencies per million words, so every book counts equally; *by number of words* adds up the raw counts, so a long book counts more than a short text. Source weights multiply a source's influence in both modes. Names (words almost always capitalised mid-sentence) are skipped automatically, except in languages that capitalise nouns, such as German. Clean sentences of 3–20 words go into the sentence database, ranked by difficulty (the rank of their rarest word).
 
@@ -138,12 +138,21 @@ Offline batches are saved to Google Drive (`MyDrive/lang-colab`) after every bat
 
 While you learn, the app prepares the current block in the background (definitions, sentence translations, example sentences, audio) with whatever services are configured. Words still missing a translation can be typed in directly from the session.
 
+**Which words or sentences a job works on.** Definitions, pronunciations (a separate job: from Wiktionary or a language model, pinyin made offline for Chinese), sentence translations and audio each choose the words or sentences to work on by the sources of what they already have:
+- **only those without any** (the default), or
+- **also those without one from the sources you tick** – for example every word whose meanings come neither from you nor from the language model; with nothing ticked, all of them.
+
+**Replace their other automatic values** removes what earlier automatic sources gave them once the new value arrives. Values typed by you and pinned values always stay. The number of words or sentences that match is shown before you start; the job takes the most frequent words and the easiest sentences first.
+
 ### Sentences
-Every sentence shows the text it comes from, and where its audio (service and voice) and translations came from. A sentence can have several translations, typed separated by semicolons (a translation never contains one), each with its source; the first is the one shown in questions, and answers are checked against all of them. Translations you add or edit are marked as yours. The microphone button lists the recordings of the sentence and of its translation. Sentences can be excluded or put back with a reason, filtered by reason, translated again, given new audio or deleted. **Reported sentences** has two jobs that only redo excluded sentences, separate from translating new sentences and generating missing audio:
+Every sentence shows all the texts it was found in (click one to see only the sentences of that text; a sentence found in several texts stays while one of them does) and where its audio (service and voice) and translations came from. A sentence can have several translations, each with its source: the first is the one shown in questions (pin one with ★ to choose it), and answers are checked against all of them. Translations you add or edit are marked as yours. The microphone button lists the recordings of the sentence and of its translation, to play, pin, delete or add. Sentences can be excluded or put back with a reason, filtered by reason or by text, translated again, given new audio or deleted. **Reported sentences** has two jobs that only redo excluded sentences, separate from translating new sentences and generating missing audio:
 - **Translate them again** (bad translation), with any configured translation service. A language model is told which translation was reported as wrong. Sentences whose translation comes back the same stay excluded.
 - **Regenerate their audio** (bad audio), with any voice service and an optional voice. The old recording (and the English one, if any) is replaced. The same service and voice usually give the same audio, so choose another one.
 
 Fixed sentences go back into the questions.
+
+### Preferred sources
+When a word or sentence has values from several sources, the one used is the pinned one (★); otherwise the one from the source highest in the **Preferred sources** lists, then the first one added. *Configuration → Words* ranks the sources of meanings, pronunciations and voices; *Configuration → Sentences* ranks texts, translations and voices. Changing the order re-sorts every word and sentence at once. When a question needs a sentence, sentences of the preferred texts are chosen first. A pinned recording is always played; otherwise one of the most preferred voice, at random among equally preferred ones.
 
 ### Images
 Images are labelled with **English words** and shared by every language. One picture can mean several words, and the image minigames accept all of them.
@@ -177,7 +186,7 @@ tests/             node:test suites (run with tsx)
 Data lives in `langData/` (or the Electron user-data folder when packaged):
 
 ```
-langData/languages/<language>.sqlite   words, sentences, sources, progress, audio
+langData/languages/<language>.sqlite   words, sentences, sources, meanings, pronunciations and translations (each with its source), progress, audio
 langData/english.sqlite                English words, images + labels, English audio, pronunciation recordings and progress
 langData/settings.json                 service settings and API keys (never exported)
 ```
