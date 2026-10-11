@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Loader2, Play, Plus, Trash2 } from 'lucide-react';
+import { Loader2, Play, Plus, Star, Trash2 } from 'lucide-react';
 import { api, errorMessage } from '../api';
 import { useApp } from '../state/AppContext';
 import { clearAudioCache } from '../lib/audio';
@@ -15,20 +15,24 @@ function play(target: string, id: number) {
 }
 
 // The stored recordings of a word or sentence, each with the voice (source)
-// that made it: play, delete, or add one with any voice service.
+// that made it: play, pin (always played), delete, or add one with any voice
+// service. Without a pin, a recording of a preferred voice is played, else one
+// at random.
 export default function Recordings({ target, text, initial }: { target: string; text: string; initial?: Recording[] }) {
   const { settings, notify } = useApp();
   const [recordings, setRecordings] = useState<Recording[] | null>(initial ?? null);
   const [service, setService] = useState<Exclude<TtsProvider, 'browser'> | ''>('');
   const [busy, setBusy] = useState(false);
 
+  const reload = () =>
+    api
+      .recordings(target, text)
+      .then(setRecordings)
+      .catch(() => setRecordings([]));
+
   useEffect(() => {
     if (initial) setRecordings(initial);
-    else
-      api
-        .recordings(target, text)
-        .then(setRecordings)
-        .catch(() => setRecordings([]));
+    else void reload();
   }, [target, text, initial]);
 
   const ready = settings ? VOICE_SERVICES.filter((option) => option.ready(settings)) : [];
@@ -48,6 +52,16 @@ export default function Recordings({ target, text, initial }: { target: string; 
     }
   }
 
+  async function pin(recording: Recording) {
+    try {
+      await api.pinRecording(target, recording.id, !recording.pinned);
+      clearAudioCache();
+      await reload();
+    } catch (err) {
+      notify(errorMessage(err), 'error');
+    }
+  }
+
   return (
     <div className="recordings">
       {recordings === null ? (
@@ -56,9 +70,17 @@ export default function Recordings({ target, text, initial }: { target: string; 
         <span className="muted">{settings?.tts.provider === 'browser' ? 'none stored: spoken by this device’s voice' : 'none stored yet'}</span>
       ) : (
         recordings.map((recording) => (
-          <span key={recording.id} className="recording" title={`Made ${new Date(recording.createdAt).toLocaleString()}`}>
+          <span key={recording.id} className={`recording ${recording.pinned ? 'pinned' : ''}`} title={`Made ${new Date(recording.createdAt).toLocaleString()}`}>
             <button type="button" className="icon-button" title="Play this recording" onClick={() => play(target, recording.id)}>
               <Play size={12} />
+            </button>
+            <button
+              type="button"
+              className={`icon-button pin ${recording.pinned ? 'active' : ''}`}
+              title={recording.pinned ? 'Always played. Click to unpin (the preferred voices decide again).' : 'Pin: always play this recording'}
+              onClick={() => void pin(recording)}
+            >
+              <Star size={12} fill={recording.pinned ? 'currentColor' : 'none'} />
             </button>
             {voiceLabel(recording.voice)}
             <button

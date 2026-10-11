@@ -10,6 +10,19 @@ export type InputMethod = 'auto' | 'system' | 'letters' | 'phonetic' | 'pinyin' 
 // (per million words), or bigger texts count more (pooled word counts).
 export type SourceWeighting = 'equal' | 'size';
 
+// Which sources are preferred for each kind of data, most preferred first.
+// Sources not listed come after the listed ones, in the order they were added.
+// `sentences`: the texts (source ids) whose sentences are asked first.
+export interface SourcePreferences {
+  meanings: string[];
+  pronunciations: string[];
+  translations: string[];
+  audio: string[];
+  sentences: number[];
+}
+
+export type SourcedKind = 'meanings' | 'pronunciations' | 'translations' | 'audio';
+
 export interface LanguageConfig {
   id: string;
   name: string;
@@ -23,6 +36,7 @@ export interface LanguageConfig {
   minSentenceWords: number;
   maxSentenceWords: number;
   ttsVoice: string;
+  sourcePreferences: SourcePreferences;
   createdAt: number;
 }
 
@@ -46,11 +60,52 @@ export interface WordLevels {
 }
 
 // A stored audio recording of a word or sentence, and the voice that made it
-// ("colab:es-ES-ElviraNeural", "azure:…", "legacy-male"...).
+// ("colab:es-ES-ElviraNeural", "azure:…", "legacy-male"...). A pinned
+// recording is always the one played.
 export interface Recording {
   id: number;
   voice: string;
   createdAt: number;
+  pinned: boolean;
+}
+
+// A meaning, pronunciation or translation with where it came from
+// ("wiktionary", "llm:…", "deepl", "word list: …", "manual" = typed by you).
+// The first of a list is the one used; a pinned value is always first,
+// otherwise the preferred sources decide.
+export interface SourcedValue {
+  id: number;
+  text: string;
+  source: string;
+  pinned: boolean;
+  createdAt: number;
+}
+
+// How many values of a kind come from each source.
+export interface SourceCount {
+  source: string;
+  count: number;
+}
+
+export interface SourceInventory {
+  meanings: SourceCount[];
+  pronunciations: SourceCount[];
+  translations: SourceCount[];
+  audio: SourceCount[];
+  // The texts sentences were found in.
+  sentences: { id: number; title: string; kind: string; count: number }[];
+}
+
+// Which words or sentences a generation job works on, judged by the sources
+// of what they already have:
+// - 'missing': only those that have none;
+// - 'unless': also those that have none from the sources in `keep`.
+// `replace`: their other automatic values are removed once the new one is
+// stored (values typed by you, and pinned ones, always stay).
+export interface RegeneratePolicy {
+  mode: 'missing' | 'unless';
+  keep: string[];
+  replace: boolean;
 }
 
 export interface WordRow {
@@ -66,6 +121,8 @@ export interface WordRow {
   // Books and word lists the word was found in (listings only).
   origins?: { title: string; count: number }[];
   audio?: Recording[];
+  // Every pronunciation with its source, the one used first (listings only).
+  pronunciations?: SourcedValue[];
   pronunciation: string | null;
   pos: string | null;
   definitionSource: string | null;
@@ -94,13 +151,35 @@ export interface SentenceRow {
   maxRank: number | null;
   excludedReason: SentenceExclusion | null;
   excludedAt: number | null;
-  // The book or text the sentence comes from.
+  // The first book or text the sentence was found in, and all of them.
   sourceTitle: string | null;
+  origins: { id: number; title: string; kind: string }[];
   // Every translation with its source; the first is the main one (english).
-  translations: { id: number; english: string; source: string }[];
+  translations: SentenceTranslation[];
   // Stored recordings of the sentence and of its main translation.
   audio: Recording[];
   englishAudio: Recording[];
+}
+
+export interface SentenceTranslation {
+  id: number;
+  english: string;
+  source: string;
+  pinned: boolean;
+  createdAt: number;
+}
+
+// One change to a meaning, pronunciation or translation: add one (typed by
+// you), edit one (it becomes yours), delete one, or pin one (always used).
+export type ValueChange = { add: string } | { edit: number; text: string } | { remove: number } | { pin: number; pinned: boolean };
+
+// Everything about a word with where each part came from.
+export interface WordDetails {
+  word: WordRow;
+  meanings: SourcedValue[];
+  pronunciations: SourcedValue[];
+  origins: { id: number; title: string; kind: string; count: number }[];
+  audio: Recording[];
 }
 
 export interface SourceRow {

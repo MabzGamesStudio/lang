@@ -10,7 +10,7 @@ import {
 } from '../db/connection.js';
 import { readMeta, writeMeta } from '../db/schema.js';
 import { findCatalogLanguage, slugify } from '../../../shared/languages.js';
-import type { InputMethod, LanguageConfig, LanguageSummary } from '../../../shared/types.js';
+import type { InputMethod, LanguageConfig, LanguageSummary, SourcePreferences } from '../../../shared/types.js';
 
 const INPUT_METHODS: InputMethod[] = ['auto', 'system', 'letters', 'phonetic', 'pinyin', 'japanese', 'hangul'];
 // Scripts with thousands of characters are typed with an input method instead of buttons.
@@ -33,7 +33,24 @@ export function defaultLanguageConfig(input: Partial<LanguageConfig> & { name: s
     minSentenceWords: input.minSentenceWords ?? 3,
     maxSentenceWords: input.maxSentenceWords ?? 20,
     ttsVoice: input.ttsVoice ?? '',
+    sourcePreferences: cleanPreferences(input.sourcePreferences),
     createdAt: input.createdAt ?? Date.now(),
+  };
+}
+
+// Preferred sources: lists of distinct entries. None by default: values are
+// used in the order they were added (or put in by hand).
+export function cleanPreferences(input: Partial<SourcePreferences> | undefined): SourcePreferences {
+  const strings = (value: unknown): string[] =>
+    Array.isArray(value) ? [...new Set(value.filter((item): item is string => typeof item === 'string' && item.length > 0))].slice(0, 100) : [];
+  return {
+    meanings: strings(input?.meanings),
+    pronunciations: strings(input?.pronunciations),
+    translations: strings(input?.translations),
+    audio: strings(input?.audio),
+    sentences: Array.isArray(input?.sentences)
+      ? [...new Set(input.sentences.filter((id): id is number => Number.isInteger(id)))].slice(0, 100)
+      : [],
   };
 }
 

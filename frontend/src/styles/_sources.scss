@@ -1,0 +1,331 @@
+@use 'variables' as *;
+
+// Meanings, pronunciations, translations and recordings with their sources
+// (Configuration → Words and Sentences), preferred sources and the options of
+// the generation jobs.
+
+.sourced-values {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+
+  li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px 6px;
+    min-height: 1.75rem;
+
+    &.pinned .value {
+      font-weight: 600;
+    }
+
+    &:hover .value-actions {
+      opacity: 1;
+    }
+  }
+
+  .value {
+    overflow-wrap: anywhere;
+  }
+
+  .source-chip {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 0 0.4rem;
+    white-space: nowrap;
+  }
+
+  .used-tag {
+    font-size: 0.68rem;
+    color: var(--primary);
+    white-space: nowrap;
+  }
+
+  .value-actions {
+    display: inline-flex;
+    opacity: 0.55;
+  }
+
+  .edit {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    flex: 1 1 12rem;
+
+    input {
+      flex: 1;
+      padding: 0.15rem 0.45rem;
+    }
+  }
+
+  .add {
+    gap: 2px;
+
+    input {
+      flex: 0 1 16rem;
+      padding: 0.15rem 0.45rem;
+      font-size: 0.85rem;
+    }
+  }
+}
+
+.icon-button.pin.active {
+  color: #fbbf24;
+}
+
+.recordings .recording.pinned {
+  font-weight: 600;
+}
+
+// A word opened in Configuration → Words (and in the dialog from a question).
+.word-details {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: $space-md $space-lg;
+  padding: $space-xs 0;
+
+  section {
+    min-width: 0;
+  }
+
+  .meanings,
+  .pronunciations {
+    padding-left: $space-sm;
+    border-left: 3px solid var(--english);
+  }
+
+  .pronunciations {
+    border-left-color: var(--ipa);
+  }
+
+  h4 {
+    margin: 0 0 $space-xs;
+    font-size: 0.9rem;
+
+    .muted {
+      font-weight: 400;
+      font-size: 0.78rem;
+    }
+  }
+
+  .origins {
+    margin: 0;
+    padding-left: 1.1rem;
+    font-size: 0.88rem;
+    line-height: 1.6;
+  }
+
+  .fetch-again {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 8px;
+    margin-top: $space-xs;
+    font-size: 0.82rem;
+
+    select {
+      padding: 0.1rem 0.3rem;
+      font-size: 0.8rem;
+    }
+  }
+
+  .word-settings {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: $space-md;
+
+    label {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      font-size: 0.82rem;
+      color: var(--text-muted);
+    }
+
+    input,
+    select {
+      padding: 0.3rem 0.5rem;
+    }
+  }
+}
+
+.modal .word-details {
+  margin-bottom: $space-md;
+}
+
+.table {
+  tr.expanded td {
+    border-bottom-color: transparent;
+  }
+
+  tr.details-row > td {
+    padding: $space-sm $space-md $space-md;
+    background: var(--surface-2);
+  }
+
+  .word-link {
+    color: var(--text);
+  }
+}
+
+.table.sentences .sourced-values {
+  min-width: 16rem;
+}
+
+// Preferred sources.
+.preference-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: $space-md;
+}
+
+.preference-list {
+  padding: $space-sm $space-md;
+  border-radius: $radius-md;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+
+  h3 {
+    margin: 0 0 2px;
+    font-size: 0.95rem;
+  }
+
+  > p {
+    margin: 0 0 $space-xs;
+    font-size: 0.8rem;
+  }
+
+  ol,
+  ul {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  li {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 1.9rem;
+    font-size: 0.86rem;
+
+    &.preferred .name {
+      font-weight: 600;
+    }
+  }
+
+  .rank {
+    display: inline-grid;
+    place-items: center;
+    flex: none;
+    width: 1.3rem;
+    height: 1.3rem;
+    border-radius: 50%;
+    background: var(--primary);
+    color: #111827;
+    font-size: 0.72rem;
+    font-weight: 700;
+  }
+
+  .name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .count {
+    font-size: 0.75rem;
+  }
+
+  .then {
+    margin: $space-xs 0 2px;
+    font-size: 0.78rem;
+  }
+}
+
+// Which words or sentences a generation job works on.
+.job-block {
+  margin-top: $space-md;
+  padding-top: $space-sm;
+  border-top: 1px solid var(--border);
+
+  h3 {
+    margin: 0 0 $space-xs;
+    font-size: 0.95rem;
+  }
+
+  > p {
+    margin: 0 0 $space-xs;
+    font-size: 0.85rem;
+  }
+
+  > .row {
+    margin-top: $space-sm;
+  }
+}
+
+.regenerate-options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.88rem;
+
+  .field-label {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+  }
+
+  .radio {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    cursor: pointer;
+  }
+
+  .source-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 6px;
+    margin: 2px 0 2px 1.4rem;
+  }
+
+  .source-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0.1rem 0.55rem;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    font-size: 0.82rem;
+    cursor: pointer;
+
+    input {
+      margin: 0;
+    }
+
+    &.on {
+      border-color: var(--primary);
+      background: color-mix(in srgb, var(--primary) 15%, transparent);
+    }
+  }
+
+  .match-count {
+    color: var(--text-muted);
+
+    strong {
+      color: var(--text);
+    }
+  }
+}

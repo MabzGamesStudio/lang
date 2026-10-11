@@ -1,12 +1,13 @@
-import { useState, type ReactNode } from 'react';
-import { BookA, Bot, Download, Languages, Mic, Rocket, ScrollText, Upload, Volume2, Zap } from 'lucide-react';
-import { api } from '../../api';
+import { useEffect, useState, type ReactNode } from 'react';
+import { AudioLines, BookA, Bot, Download, Languages, Mic, Rocket, ScrollText, Upload, Volume2, Zap } from 'lucide-react';
+import { api, type DefinitionService } from '../../api';
 import { useAction, useApp } from '../../state/AppContext';
 import { browserRecognitionAvailable } from '../../lib/speech';
 import JobsPanel from '../../components/JobsPanel';
 import { VOICE_SERVICE_OPTIONS } from './VoiceServices';
+import RegenerateOptions, { ONLY_MISSING } from './RegenerateOptions';
 import { Field, NumberInput, Section, TextInput, Toggle, useSettingsDraft } from './fields';
-import type { AppSettings, JobInfo, LanguageSummary } from '../../../../shared/types';
+import type { AppSettings, JobInfo, LanguageSummary, RegeneratePolicy, SourceInventory, SourcedKind } from '../../../../shared/types';
 
 const NOTEBOOK_PATH = 'ipynb/LangColabServer.ipynb';
 
@@ -154,12 +155,52 @@ function LlmFields({ draft, update }: { draft: AppSettings; update: (mutate: (dr
 }
 
 export default function ServicesTab() {
-  const { language } = useApp();
+  const { language, jobs } = useApp();
   const [draft, update] = useSettingsDraft();
-  const [counts, setCounts] = useState({ definitions: 300, translations: 300, generate: 100, minSentences: 3, audioWords: 300, audioSentences: 200, autopilot: 500 });
-  if (!draft) return null;
+  const [counts, setCounts] = useState({
+    definitions: 300,
+    pronunciations: 300,
+    translations: 300,
+    generate: 100,
+    minSentences: 3,
+    audioWords: 300,
+    audioSentences: 200,
+    autopilot: 500,
+  });
+  // Which words or sentences each job works on (by the sources of what they have).
+  const [policies, setPolicies] = useState<Record<SourcedKind, RegeneratePolicy>>({
+    meanings: ONLY_MISSING,
+    pronunciations: ONLY_MISSING,
+    translations: ONLY_MISSING,
+    audio: ONLY_MISSING,
+  });
+  const [pronunciationService, setPronunciationService] = useState<DefinitionService | ''>('');
+  const [inventory, setInventory] = useState<SourceInventory | null>(null);
   const langId = language?.id;
+  const running = jobs.filter((job) => job.langId === langId && job.status === 'running').length;
+  useEffect(() => {
+    if (!langId) return;
+    api
+      .sourceInventory(langId)
+      .then(setInventory)
+      .catch(() => undefined);
+  }, [langId, running]);
+  if (!draft) return null;
   const llmReady = draft.llm.provider !== 'none';
+  const chinese = (language?.code ?? '').toLowerCase().split('-')[0] === 'zh';
+  const pronunciationsFrom = pronunciationService || draft.definitions.provider;
+
+  const regenerate = (kind: SourcedKind) =>
+    language && (
+      <RegenerateOptions
+        langId={language.id}
+        kind={kind}
+        sources={inventory?.[kind] ?? []}
+        policy={policies[kind]}
+        onChange={(policy) => setPolicies((current) => ({ ...current, [kind]: policy }))}
+        refreshKey={`${running}:${language.definedWordCount}:${language.translatedSentenceCount}`}
+      />
+    );
 
   return (
     <>
@@ -184,7 +225,7 @@ export default function ServicesTab() {
         ) : (
           <p className="muted">Add a language first.</p>
         )}
-        <JobsPanel langId={langId} types={['autopilot', 'prepare', 'definitions', 'translations', 'generate', 'audio']} />
+        <JobsPanel langId={langId} types={['autopilot', 'prepare', 'definitions', 'pronunciations', 'translations', 'generate', 'audio']} />
       </Section>
 
       <Section
@@ -212,7 +253,10 @@ export default function ServicesTab() {
         <LlmFields draft={draft} update={update} />
       </Section>
 
-      <Section title="Definitions & pronunciation" description="English translations (several per word, so answers are forgiving), part of speech and IPA pronunciation for every word.">
+      <Section
+        title="Definitions & pronunciation"
+        description="English translations (several per word, so answers are forgiving), part of speech and IPA pronunciation for every word. Each meaning and pronunciation keeps its source: see them, and choose which source is preferred, in Configuration → Words."
+      >
         <div className="form-grid">
           <Field label="Source">
             <select value={draft.definitions.provider} onChange={(event) => update((s) => void (s.definitions.provider = event.target.value as AppSettings['definitions']['provider']))}>
@@ -226,21 +270,66 @@ export default function ServicesTab() {
         </div>
         {language && <UndefinedCount language={language} />}
         {language && (
-          <div className="row">
-            <Field label="Next words">
-              <NumberInput value={counts.definitions} min={1} max={50000} onChange={(value) => setCounts({ ...counts, definitions: value })} />
-            </Field>
-            <JobButton
-              icon={<BookA size={16} />}
-              label={`Fetch definitions for the next ${counts.definitions} words without one`}
-              start={() => api.fetchDefinitions(language.id, counts.definitions)}
-              disabled={draft.definitions.provider === 'llm' && !llmReady}
-            />
+          <div className="job-block">
+            <h3>Meanings (with part of speech and pronunciation)</h3>
+            {regenerate('meanings')}
+            <div className="row">
+              <Field label="Next words">
+                <NumberInput value={counts.definitions} min={1} max={50000} onChange={(value) => setCounts({ ...counts, definitions: value })} />
+              </Field>
+              <JobButton
+                icon={<BookA size={16} />}
+                label={`Fetch definitions for the next ${counts.definitions} words`}
+                start={() => api.fetchDefinitions(language.id, { limit: counts.definitions, policy: policies.meanings })}
+                disabled={draft.definitions.provider === 'llm' && !llmReady}
+              />
+            </div>
+          </div>
+        )}
+        {language && (
+          <div className="job-block">
+            <h3>Pronunciations only</h3>
+            {chinese ? (
+              <p className="muted">Chinese pronunciations are pinyin, made offline (no service needed).</p>
+            ) : (
+              <p className="muted">For words that need a pronunciation from another source than their meanings.</p>
+            )}
+            {regenerate('pronunciations')}
+            <div className="row">
+              {!chinese && (
+                <Field label="From">
+                  <select value={pronunciationsFrom} onChange={(event) => setPronunciationService(event.target.value as DefinitionService)}>
+                    <option value="wiktionary">Wiktionary</option>
+                    <option value="llm" disabled={!llmReady}>
+                      Language model{llmReady ? '' : ' (not set up)'}
+                    </option>
+                  </select>
+                </Field>
+              )}
+              <Field label="Next words">
+                <NumberInput value={counts.pronunciations} min={1} max={50000} onChange={(value) => setCounts({ ...counts, pronunciations: value })} />
+              </Field>
+              <JobButton
+                icon={<AudioLines size={16} />}
+                label={`Fetch pronunciations for the next ${counts.pronunciations} words`}
+                start={() =>
+                  api.fetchPronunciations(language.id, {
+                    limit: counts.pronunciations,
+                    policy: policies.pronunciations,
+                    provider: chinese ? undefined : pronunciationsFrom,
+                  })
+                }
+                disabled={!chinese && pronunciationsFrom === 'llm' && !llmReady}
+              />
+            </div>
           </div>
         )}
       </Section>
 
-      <Section title="Sentence translation" description="Sentences are translated in batches, easiest first, and saved to the sentence database.">
+      <Section
+        title="Sentence translation"
+        description="Sentences are translated in batches, easiest first, and saved to the sentence database. Each translation keeps its source: see them, and choose which source is preferred, in Configuration → Sentences."
+      >
         <div className="form-grid">
           <Field label="Service">
             <select value={draft.translation.provider} onChange={(event) => update((s) => void (s.translation.provider = event.target.value as AppSettings['translation']['provider']))}>
@@ -277,12 +366,19 @@ export default function ServicesTab() {
           )}
         </div>
         {language && (
-          <div className="row">
-            <TestButton service="translation" langId={language.id} />
-            <Field label="Next sentences">
-              <NumberInput value={counts.translations} min={1} max={100000} onChange={(value) => setCounts({ ...counts, translations: value })} />
-            </Field>
-            <JobButton icon={<Languages size={16} />} label={`Translate the next ${counts.translations} sentences`} start={() => api.translateSentences(language.id, counts.translations)} />
+          <div className="job-block">
+            {regenerate('translations')}
+            <div className="row">
+              <TestButton service="translation" langId={language.id} />
+              <Field label="Next sentences">
+                <NumberInput value={counts.translations} min={1} max={100000} onChange={(value) => setCounts({ ...counts, translations: value })} />
+              </Field>
+              <JobButton
+                icon={<Languages size={16} />}
+                label={`Translate the next ${counts.translations} sentences`}
+                start={() => api.translateSentences(language.id, { limit: counts.translations, policy: policies.translations })}
+              />
+            </div>
           </div>
         )}
       </Section>
@@ -370,18 +466,26 @@ export default function ServicesTab() {
         </div>
         <p className="muted">
           Each language's voice is set in the Language tab. With Google Colab, the notebook setting <code>TTS_ENGINE</code> picks Microsoft voices
-          or the open-source Kokoro or Chatterbox models. A comparison of all options is in Configuration → Sources.
+          or the open-source Kokoro or Chatterbox models. A comparison of all options is in Configuration → Sources. A word or sentence can keep
+          recordings of several voices: which one is played is chosen in Configuration → Words or Sentences.
         </p>
         {language && draft.tts.provider !== 'browser' && (
-          <div className="row">
-            <TestButton service="tts" langId={language.id} />
-            <Field label="Words">
-              <NumberInput value={counts.audioWords} min={0} max={50000} onChange={(value) => setCounts({ ...counts, audioWords: value })} />
-            </Field>
-            <Field label="Sentences">
-              <NumberInput value={counts.audioSentences} min={0} max={50000} onChange={(value) => setCounts({ ...counts, audioSentences: value })} />
-            </Field>
-            <JobButton icon={<Volume2 size={16} />} label="Pre-generate audio" start={() => api.generateAudio(language.id, counts.audioWords, counts.audioSentences)} />
+          <div className="job-block">
+            {regenerate('audio')}
+            <div className="row">
+              <TestButton service="tts" langId={language.id} />
+              <Field label="Words">
+                <NumberInput value={counts.audioWords} min={0} max={50000} onChange={(value) => setCounts({ ...counts, audioWords: value })} />
+              </Field>
+              <Field label="Sentences">
+                <NumberInput value={counts.audioSentences} min={0} max={50000} onChange={(value) => setCounts({ ...counts, audioSentences: value })} />
+              </Field>
+              <JobButton
+                icon={<Volume2 size={16} />}
+                label="Pre-generate audio"
+                start={() => api.generateAudio(language.id, { words: counts.audioWords, sentences: counts.audioSentences, policy: policies.audio })}
+              />
+            </div>
           </div>
         )}
       </Section>

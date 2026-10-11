@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3';
 
-export const LANGUAGE_SCHEMA_VERSION = 3;
-export const ENGLISH_SCHEMA_VERSION = 3;
+export const LANGUAGE_SCHEMA_VERSION = 4;
+export const ENGLISH_SCHEMA_VERSION = 4;
 
 const LANGUAGE_SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (
@@ -97,9 +97,41 @@ CREATE TABLE IF NOT EXISTS sentence_translations (
   source TEXT NOT NULL,
   position INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
+  pinned INTEGER NOT NULL DEFAULT 0,
   UNIQUE (sentence_id, english)
 );
 CREATE INDEX IF NOT EXISTS sentence_translations_sentence ON sentence_translations(sentence_id, position);
+
+CREATE TABLE IF NOT EXISTS sentence_sources (
+  sentence_id INTEGER NOT NULL REFERENCES sentences(id) ON DELETE CASCADE,
+  source_id INTEGER NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+  PRIMARY KEY (sentence_id, source_id)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS sentence_sources_source ON sentence_sources(source_id);
+
+CREATE TABLE IF NOT EXISTS word_meanings (
+  id INTEGER PRIMARY KEY,
+  word_id INTEGER NOT NULL REFERENCES words(id) ON DELETE CASCADE,
+  english TEXT NOT NULL,
+  source TEXT NOT NULL,
+  position INTEGER NOT NULL DEFAULT 0,
+  pinned INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  UNIQUE (word_id, english COLLATE NOCASE)
+);
+CREATE INDEX IF NOT EXISTS word_meanings_word ON word_meanings(word_id, position);
+
+CREATE TABLE IF NOT EXISTS word_pronunciations (
+  id INTEGER PRIMARY KEY,
+  word_id INTEGER NOT NULL REFERENCES words(id) ON DELETE CASCADE,
+  pronunciation TEXT NOT NULL,
+  source TEXT NOT NULL,
+  position INTEGER NOT NULL DEFAULT 0,
+  pinned INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  UNIQUE (word_id, pronunciation)
+);
+CREATE INDEX IF NOT EXISTS word_pronunciations_word ON word_pronunciations(word_id, position);
 
 CREATE TABLE IF NOT EXISTS sentence_words (
   sentence_id INTEGER NOT NULL REFERENCES sentences(id) ON DELETE CASCADE,
@@ -116,6 +148,7 @@ CREATE TABLE IF NOT EXISTS audio (
   mime TEXT NOT NULL,
   data BLOB NOT NULL,
   created_at INTEGER NOT NULL,
+  pinned INTEGER NOT NULL DEFAULT 0,
   UNIQUE (text, voice)
 );
 
@@ -167,6 +200,7 @@ CREATE TABLE IF NOT EXISTS audio (
   mime TEXT NOT NULL,
   data BLOB NOT NULL,
   created_at INTEGER NOT NULL,
+  pinned INTEGER NOT NULL DEFAULT 0,
   UNIQUE (text, voice)
 );
 
@@ -223,7 +257,8 @@ function schemaVersion(db: Database.Database): number {
 // sounds and example words (ipa_audio: lang "ipa" for a sound on its own,
 // source "commons:<file>" or a voice key) and progress per sound
 // (ipa_progress). 3 adds the repetition schedule of each sound (like words:
-// srs_stage, next_review_at…) and the answers per day (ipa_activity).
+// srs_stage, next_review_at…) and the answers per day (ipa_activity). 4: a
+// recording can be pinned as the one to play (audio.pinned).
 
 // Changes to tables of existing databases, by the schema version they lead to.
 // New databases get the columns from the CREATE TABLE statements directly.
@@ -232,7 +267,18 @@ function schemaVersion(db: Database.Database): number {
 // 3: several translations per sentence, each with its source
 //    (sentence_translations; sentences.english stays the main one), and the
 //    source of each English meaning of a word (words.english_sources).
+// 4: every value keeps its source in its own table: meanings
+//    (word_meanings) and pronunciations (word_pronunciations) of words, with
+//    words.english / english_sources / pronunciation kept as the values in
+//    order of preference; every text a sentence was found in
+//    (sentence_sources); a value or recording can be pinned as the one to use.
 type Upgrade = string | ((db: Database.Database) => void);
+
+// Adds a column unless the table already has it.
+function addColumn(db: Database.Database, table: string, column: string, definition: string): void {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (!columns.some((existing) => existing.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+}
 
 const LANGUAGE_UPGRADES: Record<number, Upgrade> = {
   2: `ALTER TABLE sentences ADD COLUMN excluded_reason TEXT;
@@ -268,6 +314,67 @@ const LANGUAGE_UPGRADES: Record<number, Upgrade> = {
       update.run(JSON.stringify(new Array(count).fill(row.source ?? 'unknown')), row.id);
     }
   },
+  4: (db) => {
+    const now = Date.now();
+    addColumn(db, 'sentence_translations', 'pinned', 'INTEGER NOT NULL DEFAULT 0');
+    addColumn(db, 'audio', 'pinned', 'INTEGER NOT NULL DEFAULT 0');
+    db.exec(`CREATE TABLE IF NOT EXISTS sentence_sources (
+        sentence_id INTEGER NOT NULL REFERENCES sentences(id) ON DELETE CASCADE,
+        source_id INTEGER NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+        PRIMARY KEY (sentence_id, source_id)
+      ) WITHOUT ROWID;
+      INSERT OR IGNORE INTO sentence_sources (sentence_id, source_id)
+        SELECT id, source_id FROM sentences WHERE source_id IS NOT NULL AND source_id IN (SELECT id FROM sources);
+      CREATE TABLE IF NOT EXISTS word_meanings (
+        id INTEGER PRIMARY KEY,
+        word_id INTEGER NOT NULL REFERENCES words(id) ON DELETE CASCADE,
+        english TEXT NOT NULL,
+        source TEXT NOT NULL,
+        position INTEGER NOT NULL DEFAULT 0,
+        pinned INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        UNIQUE (word_id, english COLLATE NOCASE)
+      );
+      CREATE TABLE IF NOT EXISTS word_pronunciations (
+        id INTEGER PRIMARY KEY,
+        word_id INTEGER NOT NULL REFERENCES words(id) ON DELETE CASCADE,
+        pronunciation TEXT NOT NULL,
+        source TEXT NOT NULL,
+        position INTEGER NOT NULL DEFAULT 0,
+        pinned INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        UNIQUE (word_id, pronunciation)
+      );
+      INSERT OR IGNORE INTO word_pronunciations (word_id, pronunciation, source, position, created_at)
+        SELECT id, pronunciation, COALESCE(definition_source, 'unknown'), 0, ${now} FROM words WHERE pronunciation IS NOT NULL AND pronunciation != '';`);
+    // The meanings stored as two JSON arrays (texts and sources) get a row each.
+    const insert = db.prepare(
+      `INSERT OR IGNORE INTO word_meanings (word_id, english, source, position, created_at) VALUES (?, ?, ?, ?, ?)`
+    );
+    const rows = db.prepare(`SELECT id, english, english_sources, definition_source FROM words WHERE english IS NOT NULL`).all() as {
+      id: number;
+      english: string;
+      english_sources: string | null;
+      definition_source: string | null;
+    }[];
+    const parse = (value: string | null): unknown[] => {
+      try {
+        const parsed: unknown = value ? JSON.parse(value) : [];
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return value ? [value] : [];
+      }
+    };
+    for (const row of rows) {
+      const texts = parse(row.english);
+      const sources = parse(row.english_sources);
+      texts.forEach((text, index) => {
+        if (typeof text !== 'string' || !text.trim()) return;
+        const source = typeof sources[index] === 'string' ? (sources[index] as string) : (row.definition_source ?? 'unknown');
+        insert.run(row.id, text.trim(), source, index, now);
+      });
+    }
+  },
 };
 
 const ENGLISH_UPGRADES: Record<number, Upgrade> = {
@@ -282,6 +389,7 @@ const ENGLISH_UPGRADES: Record<number, Upgrade> = {
       ALTER TABLE ipa_progress ADD COLUMN review_errors INTEGER NOT NULL DEFAULT 0;
       UPDATE ipa_progress SET first_seen_at = last_seen_at;`);
   },
+  4: (db) => addColumn(db, 'audio', 'pinned', 'INTEGER NOT NULL DEFAULT 0'),
 };
 
 function migrate(db: Database.Database, schema: string, kind: string, version: number, upgrades: Record<number, Upgrade> = {}): void {
