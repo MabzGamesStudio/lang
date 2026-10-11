@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { CheckCircle2, Pencil, Volume2, XCircle } from 'lucide-react';
+import { CheckCircle2, Pencil, ThumbsUp, Volume2, XCircle } from 'lucide-react';
 import { playText } from '../../lib/audio';
 import { qualityLabel, type Outcome } from '../../lib/evaluate';
 import { useKey } from '../../lib/hooks';
@@ -99,6 +99,7 @@ export default function Feedback({
   settings,
   onContinue,
   onEditWord,
+  onOverride,
 }: {
   question: Question;
   outcome: Outcome;
@@ -106,6 +107,8 @@ export default function Feedback({
   settings: AppSettings;
   onContinue: () => void;
   onEditWord: (word: QuestionWord) => void;
+  // Translations: count the answer as right (it fits well enough).
+  onOverride?: () => void;
 }) {
   // Rote reinforcement: after a mistake, type the right answer once.
   const mustRetype = !outcome.correct && settings.learning.retypeOnMistake && question.response.mode === 'type' && !question.sentence;
@@ -201,7 +204,12 @@ export default function Feedback({
             </div>
           )}
           {outcome.matched && question.answerSide === 'english' && <div className="muted">Closest translation: “{outcome.matched}”</div>}
-          <SentenceWords questionKey={question.key} tokens={question.sentence.tokens} language={language} />
+          <SentenceWords
+            questionKey={question.key}
+            tokens={question.sentence.tokens}
+            language={language}
+            results={new Map(outcome.results.filter((result) => result.phase === question.phase).map((result) => [result.wordId, result.correct]))}
+          />
         </div>
       )}
       {outcome.note && <div className="note">{outcome.note}</div>}
@@ -246,9 +254,20 @@ export default function Feedback({
           )}
         </div>
       )}
-      <button className="button primary continue" onClick={onContinue} disabled={!retypeOk}>
-        Continue (Enter)
-      </button>
+      <div className="feedback-actions">
+        {onOverride && (
+          <button
+            className="button override"
+            onClick={onOverride}
+            title="Your translation fits well enough: count it as right, every scored word of the sentence gets its point"
+          >
+            <ThumbsUp size={16} /> My answer is right
+          </button>
+        )}
+        <button className="button primary continue" onClick={onContinue} disabled={!retypeOk}>
+          Continue (Enter)
+        </button>
+      </div>
     </div>
   );
 }

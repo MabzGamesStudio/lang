@@ -292,37 +292,33 @@ function nextPosition(words: Learner[], rules: Rules): { batch: number; phase: P
   return null;
 }
 
-// Review mode: words whose repetition milestone is due, 7 at a time, in
-// frequency order. A review batch is finished before the next one starts.
+// Review mode: every word whose repetition milestone is due is reviewed at
+// once, phase by phase (all of them in recognition, then recall…), in
+// frequency order. Words that fall due during a review join it.
 export function reviewState(db: DB, rules: Rules): EngineState {
   const now = Date.now();
   const frontier =
     (db.prepare(`SELECT MAX(rank) AS rank FROM words WHERE active = 1 AND srs_stage > 0`).get() as { rank: number | null })
       .rank ?? 0;
   for (let attempt = 0; attempt < 50; attempt++) {
-    let batch = loadLearners(
-      db,
-      `active = 1 AND srs_stage > 0 AND review_started_at IS NOT NULL ORDER BY rank LIMIT ?`,
-      BATCH_SIZE
-    );
-    if (batch.length === 0) {
-      const due = loadLearners(db, `active = 1 AND srs_stage > 0 AND next_review_at <= ? ORDER BY rank LIMIT ?`, now, BATCH_SIZE);
-      if (due.length === 0) {
-        const next = db
-          .prepare(`SELECT MIN(next_review_at) AS at FROM words WHERE active = 1 AND srs_stage > 0`)
-          .get() as { at: number | null };
-        return {
-          state: emptyState('review'),
-          candidates: [],
-          batchWords: [],
-          notice: { kind: 'reviewsDone', message: 'No reviews are due right now.', nextDueAt: next.at },
-        };
-      }
-      startReview(db, due.map((w) => w.id), now, rules.required);
-      batch = loadLearners(db, `id IN (SELECT value FROM json_each(?)) ORDER BY rank`, JSON.stringify(due.map((w) => w.id)));
+    const due = db
+      .prepare(`SELECT id FROM words WHERE active = 1 AND srs_stage > 0 AND review_started_at IS NULL AND next_review_at <= ?`)
+      .all(now) as { id: number }[];
+    if (due.length) startReview(db, due.map((w) => w.id), now, rules.required);
+    const reviewing = loadLearners(db, `active = 1 AND srs_stage > 0 AND review_started_at IS NOT NULL ORDER BY rank`);
+    if (reviewing.length === 0) {
+      const next = db
+        .prepare(`SELECT MIN(next_review_at) AS at FROM words WHERE active = 1 AND srs_stage > 0`)
+        .get() as { at: number | null };
+      return {
+        state: emptyState('review'),
+        candidates: [],
+        batchWords: [],
+        notice: { kind: 'reviewsDone', message: 'No reviews are due right now.', nextDueAt: next.at },
+      };
     }
     for (const phase of PHASES) {
-      const candidates = batch.filter(
+      const candidates = reviewing.filter(
         (w) => ready(w) && phaseApplicable(phase, w, rules.games) && level(w, phase) < rules.required[phase]
       );
       if (candidates.length === 0) continue;
@@ -332,17 +328,17 @@ export function reviewState(db: DB, rules: Rules): EngineState {
           block: null,
           phase,
           batch: null,
-          batchWords: batch.map(toBatchWord),
+          batchWords: reviewing.map(toBatchWord),
           newBatch: false,
           frontier,
         },
-        batchWords: batch,
+        batchWords: reviewing,
         candidates,
         notice: null,
       };
     }
-    // Nothing left to practise in this batch (e.g. games were disabled).
-    for (const word of batch) completeReview(db, word, now);
+    // Nothing left to practise (e.g. games were disabled).
+    for (const word of reviewing) completeReview(db, word, now);
   }
   throw new HttpError(500, 'Could not determine the next review batch');
 }

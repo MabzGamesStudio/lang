@@ -9,6 +9,7 @@ import { useIpaScope } from '../lib/ipaScope';
 import IpaRunner from '../components/ipa/IpaRunner';
 import { soundRef } from '../components/ipa/IpaFeedback';
 import LevelDots from '../components/LevelDots';
+import BatchWords from '../components/BatchWords';
 import Pomodoro from '../components/Pomodoro';
 import { SessionHeader } from './SessionPage';
 import { IPA_BLOCK_BATCHES, type IpaGameId, type IpaNextResponse, type IpaNotice, type IpaResultsResponse, type IpaSessionState } from '../../../shared/ipa/games';
@@ -99,8 +100,8 @@ export default function PronunciationSessionPage() {
         </div>
       </header>
       {state && <SessionHeader state={state} blockBatches={IPA_BLOCK_BATCHES} />}
-      {state && state.batchSounds.length > 0 && (
-        <div className="batch-words">
+      {state && (
+        <BatchWords count={state.batchSounds.length} noun="sounds">
           {state.batchSounds.map((sound) => (
             <button
               key={sound.symbol}
@@ -113,7 +114,7 @@ export default function PronunciationSessionPage() {
               <LevelDots levels={sound.levels} />
             </button>
           ))}
-        </div>
+        </BatchWords>
       )}
       <IpaRunner
         fetchNext={fetchNext}

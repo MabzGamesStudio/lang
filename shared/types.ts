@@ -223,6 +223,9 @@ export interface SentenceToken {
   // Why a word is not scored: not counted (a name or excluded word), not met
   // yet, or further on in the vocabulary.
   skip?: 'excluded' | 'unseen' | 'later';
+  // Answers in English: the meanings of a scored word, so that each word whose
+  // meaning is in the answer earns its point.
+  english?: string[];
 }
 
 export interface QuestionWord {

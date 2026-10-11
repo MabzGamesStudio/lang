@@ -6,6 +6,7 @@ import { api } from '../api';
 import { useStoredState } from '../lib/hooks';
 import MinigameRunner from '../components/minigame/MinigameRunner';
 import LevelDots from '../components/LevelDots';
+import BatchWords from '../components/BatchWords';
 import GameIcons from '../components/GameIcons';
 import { GAMES_BY_ID, isGameId } from '../../../shared/games';
 import { BATCH_SIZE, requiredLevels } from '../../../shared/scoring';
@@ -105,14 +106,14 @@ export default function PlayPage() {
           )}
         </div>
       </header>
-      <div className="batch-words">
+      <BatchWords count={batchWords.length}>
         {batchWords.map((word) => (
           <span key={word.id} className="batch-word" title={word.english.join('; ')}>
             {word.display}
             <LevelDots levels={word.levels} only={game.phase} />
           </span>
         ))}
-      </div>
+      </BatchWords>
       <MinigameRunner
         language={language}
         settings={settings}

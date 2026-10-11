@@ -716,6 +716,8 @@ export function apiRouter(): Router {
         (r: Partial<WordResult>) => Number.isInteger(r.wordId) && PHASES.includes(r.phase as WordResult['phase']) && typeof r.correct === 'boolean'
       )
       .slice(0, 200);
+    // An answer counted again (e.g. accepted by the learner): the first results are undone.
+    if (typeof req.body?.replaces === 'string') undoResults(lang(req), req.body.replaces);
     res.json(applyResults(lang(req), results));
   });
 

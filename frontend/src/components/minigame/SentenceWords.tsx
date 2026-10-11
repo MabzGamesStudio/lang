@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Ban, RotateCcw } from 'lucide-react';
+import { Ban, Check, RotateCcw, X } from 'lucide-react';
 import { api, errorMessage } from '../../api';
 import { useApp } from '../../state/AppContext';
 import type { LanguageSummary, SentenceToken } from '../../../../shared/types';
@@ -10,10 +10,21 @@ const SKIP_TITLES: Record<NonNullable<SentenceToken['skip']>, string> = {
   later: 'Not counted: further on in the vocabulary',
 };
 
-// The words of a sentence question, showing which ones were scored. Any word
-// can be made neutral (e.g. a name): it is taken out of the vocabulary and
-// never counted again — or counted again.
-export default function SentenceWords({ questionKey, tokens, language }: { questionKey: string; tokens: SentenceToken[]; language: LanguageSummary }) {
+// The words of a sentence question, showing which ones were scored and, after
+// an answer, which earned a point (`results`: word id → right). Any word can
+// be made neutral (e.g. a name): it is taken out of the vocabulary and never
+// counted again — or counted again.
+export default function SentenceWords({
+  questionKey,
+  tokens,
+  language,
+  results,
+}: {
+  questionKey: string;
+  tokens: SentenceToken[];
+  language: LanguageSummary;
+  results?: Map<number, boolean>;
+}) {
   const { notify } = useApp();
   // Word id → excluded (true) or counted again (false) during this question.
   const [changed, setChanged] = useState<Record<number, boolean>>({});
@@ -38,13 +49,25 @@ export default function SentenceWords({ questionKey, tokens, language }: { quest
     }
   }
 
+  const right = results ? [...results.values()].filter(Boolean).length : 0;
+  const missed = results ? results.size - right : 0;
   return (
     <div className="sentence-words">
-      <span className="muted">Words</span>
+      <span className="muted">
+        Words
+        {results && results.size > 0 && (
+          <>
+            {' '}
+            · {right} point{right === 1 ? '' : 's'}
+            {missed > 0 ? `, ${missed} to practise` : ''}
+          </>
+        )}
+      </span>
       {words.map((token) => {
         const change = changed[token.wordId!];
         const excluded = change ?? token.skip === 'excluded';
         const state = excluded ? 'excluded' : change === false ? 'restored' : token.evaluate ? 'counted' : 'uncounted';
+        const point = results?.get(token.wordId!);
         const title =
           state === 'excluded'
             ? SKIP_TITLES.excluded
@@ -56,7 +79,14 @@ export default function SentenceWords({ questionKey, tokens, language }: { quest
                   : 'Scored in this sentence'
                 : SKIP_TITLES[token.skip ?? 'unseen'];
         return (
-          <span key={token.wordId} className={`word-chip ${state} ${token.target ? 'target' : ''}`} title={title} lang={language.code}>
+          <span
+            key={token.wordId}
+            className={`word-chip ${state} ${token.target ? 'target' : ''} ${point === true ? 'point' : point === false ? 'missed' : ''}`}
+            title={point === true ? `${title} — right in your answer: +1` : point === false ? `${title} — not right in your answer` : title}
+            lang={language.code}
+          >
+            {point === true && <Check size={12} className="point-mark" />}
+            {point === false && <X size={12} className="point-mark" />}
             {token.text}
             {!token.target &&
               (excluded ? (

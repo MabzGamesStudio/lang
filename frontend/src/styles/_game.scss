@@ -49,8 +49,32 @@
 .batch-words {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: $space-sm;
   margin-bottom: $space-lg;
+
+  &.collapsed {
+    margin-bottom: $space-md;
+  }
+}
+
+.batch-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.25rem 0.55rem;
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+
+  &:hover {
+    color: var(--text);
+    border-color: var(--text-muted);
+  }
 }
 
 .batch-word {
@@ -753,6 +777,17 @@
     align-self: flex-end;
   }
 
+  .feedback-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: $space-sm;
+  }
+
+  .override {
+    border-color: rgba(34, 197, 94, 0.5);
+  }
+
   .retype {
     display: flex;
     flex-direction: column;
@@ -861,6 +896,29 @@
   &.excluded {
     color: var(--text-muted);
     text-decoration: line-through;
+  }
+
+  // After an answer: the words that earned their point, and the others.
+  &.point {
+    border-color: rgba(34, 197, 94, 0.7);
+    background: rgba(34, 197, 94, 0.15);
+  }
+
+  &.missed {
+    border-color: rgba(239, 68, 68, 0.7);
+    background: rgba(239, 68, 68, 0.15);
+  }
+
+  .point-mark {
+    margin-right: 2px;
+  }
+
+  &.point .point-mark {
+    color: $correct;
+  }
+
+  &.missed .point-mark {
+    color: #f87171;
   }
 
   button {

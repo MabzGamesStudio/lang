@@ -131,6 +131,41 @@ test('batch-by-batch order and custom mastery counts', async () => {
   saveSettings({});
 });
 
+test('every due word is reviewed at once, phase by phase', async () => {
+  saveSettings({});
+  const db = await freshSpanish('spanish-review');
+  const learned = db
+    .prepare(`SELECT id FROM words WHERE active = 1 AND rank IS NOT NULL ORDER BY rank LIMIT 20`)
+    .all() as { id: number }[];
+  const mark = db.prepare(
+    `UPDATE words SET srs_stage = 1, learned_at = 0, next_review_at = ?, recognition_level = 2, recall_level = 3, recite_level = 2, translate_level = 3,
+       first_seen_at = 0, last_seen_at = 0 WHERE id = ?`
+  );
+  // 19 words are due; the last one falls due during the review.
+  learned.forEach(({ id }, index) => mark.run(index < 19 ? 0 : Date.now() + 60_000, id));
+  let next = sessionNext('spanish-review', { mode: 'review', recent: [], lastGameId: null });
+  assert.equal(next.state.batchWords.length, 19, 'all the due words, not 7 of them');
+  assert.equal(next.state.phase, 'recognition');
+  const started = (db.prepare(`SELECT COUNT(*) AS n FROM words WHERE review_started_at IS NOT NULL`).get() as { n: number }).n;
+  assert.equal(started, 19);
+
+  db.prepare(`UPDATE words SET next_review_at = 0 WHERE id = ?`).run(learned[19].id);
+  const phases: string[] = [];
+  const asked = new Set<number>();
+  let questions = 0;
+  while (next.question && questions < 2000) {
+    if (phases[phases.length - 1] !== next.state.phase) phases.push(next.state.phase!);
+    if (next.state.phase === 'recognition') asked.add(next.question.targetWordId);
+    applyResults('spanish-review', answer(next.question, true));
+    next = sessionNext('spanish-review', { mode: 'review', recent: [next.question.targetWordId], lastGameId: next.question.gameId });
+    questions++;
+  }
+  assert.deepEqual(phases, ['recognition', 'recall', 'recite', 'translate'], 'each phase once, for every word');
+  assert.equal(asked.size, 20, 'the word that fell due joined the review');
+  const done = (db.prepare(`SELECT COUNT(*) AS n FROM words WHERE srs_stage = 2 AND review_started_at IS NULL`).get() as { n: number }).n;
+  assert.equal(done, 20);
+});
+
 test('sources can be weighted by their number of words', async () => {
   createLanguage({ name: 'Spanish', id: 'weights' } as never);
   // A long text where "perro" is common and a short one where "gato" is.

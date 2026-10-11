@@ -307,6 +307,17 @@ export function partRanges(count: number, max: number): [number, number][] {
   return ranges;
 }
 
+// Answers in English: the meanings of the scored words (see SentenceToken).
+function withMeanings(ctx: BuildContext, tokens: SentenceToken[]): SentenceToken[] {
+  const ids = [...new Set(tokens.filter((token) => token.evaluate && token.wordId !== null).map((token) => token.wordId!))];
+  if (ids.length === 0) return tokens;
+  const rows = ctx.db
+    .prepare(`SELECT id, english FROM words WHERE id IN (SELECT value FROM json_each(?))`)
+    .all(JSON.stringify(ids)) as { id: number; english: string | null }[];
+  const meanings = new Map(rows.map((row) => [row.id, parseEnglish(row.english)]));
+  return tokens.map((token) => (token.evaluate && token.wordId !== null ? { ...token, english: meanings.get(token.wordId) ?? [] } : token));
+}
+
 // Words of a translate question that are not scored, with their meanings.
 function hintsFor(ctx: BuildContext, tokens: SentenceToken[]): { text: string; english: string[] }[] {
   const ids = [...new Set(tokens.filter((token) => !token.evaluate && !token.target && token.wordId !== null).map((token) => token.wordId!))];
@@ -344,6 +355,7 @@ function buildSentence(game: GameDef, target: Learner, ctx: BuildContext): Quest
   const answer = game.response.side === 'foreign' ? text : sentence.english ?? '';
   const accepted = game.response.side === 'foreign' ? [text] : translations.length ? translations : [answer];
   const hints = game.phase === 'translate' ? hintsFor(ctx, tokens) : [];
+  if (game.response.side === 'english') tokens = withMeanings(ctx, tokens);
   return {
     key: randomUUID(),
     gameId: game.id,
