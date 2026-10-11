@@ -191,7 +191,8 @@ export const api = {
     post<NextResponse>(`${L(id)}/session/next`, body),
   playNext: (id: string, body: { gameId: GameId; batch: number; cumulative: boolean; recent: number[] }) =>
     post<NextResponse>(`${L(id)}/play/next`, body),
-  results: (id: string, results: WordResult[]) => post<ResultsResponse>(`${L(id)}/results`, { results }),
+  // `replaces`: the undo id of results given before for the same answer (counted again).
+  results: (id: string, results: WordResult[], replaces?: string) => post<ResultsResponse>(`${L(id)}/results`, { results, replaces }),
   judge: (id: string, body: { direction: 'toEnglish' | 'toForeign'; source: string; reference: string; answer: string }) =>
     post<JudgeResponse>(`${L(id)}/judge`, body),
   progress: (id: string) => get<ProgressSummary>(`${L(id)}/progress`),

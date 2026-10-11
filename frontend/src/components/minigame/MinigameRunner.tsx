@@ -4,7 +4,7 @@ import { api, errorMessage } from '../../api';
 import { useApp } from '../../state/AppContext';
 import { playText, prefetchAudio, stopAudio } from '../../lib/audio';
 import { useKey } from '../../lib/hooks';
-import { acceptedByJudge, type Outcome } from '../../lib/evaluate';
+import { acceptedByJudge, acceptedByYou, type Outcome } from '../../lib/evaluate';
 import PromptView, { voiceFor } from './PromptView';
 import { ChoiceAnswer, SpokenAnswer, TypedAnswer } from './Answers';
 import Feedback from './Feedback';
@@ -163,6 +163,23 @@ export default function MinigameRunner({
     [question, language, settings, notify, load, paused]
   );
 
+  // Translations: the learner counts the answer as right. The results already
+  // saved for it are replaced by a point for every scored word.
+  const override = useCallback(async () => {
+    if (!question || !outcome) return;
+    window.clearTimeout(advanceTimer.current);
+    const accepted = acceptedByYou(question, outcome);
+    setOutcome(accepted);
+    const undoId = (await resultsRef.current)?.undoId;
+    const pending = api.results(language.id, accepted.results, undoId);
+    resultsRef.current = pending.catch(() => null);
+    try {
+      callbacks.current.onResults?.(await pending);
+    } catch (err) {
+      notify(`Result not saved: ${errorMessage(err)}`, 'error');
+    }
+  }, [question, outcome, language.id, notify]);
+
   // Takes the sentence out of the questions; an answer already given does not count.
   const report = useCallback(
     async (reason: SentenceExclusion) => {
@@ -310,6 +327,11 @@ export default function MinigameRunner({
           language={language}
           settings={settings}
           onContinue={() => void load()}
+          onOverride={
+            question.phase === 'translate' && question.sentence && outcome.quality !== 'yours' && outcome.results.some((result) => !result.correct)
+              ? () => void override()
+              : undefined
+          }
           onEditWord={(word) => {
             window.clearTimeout(advanceTimer.current);
             setEditing({ id: word.id, display: word.display, english: word.english, pronunciation: word.pronunciation, pos: word.pos });

@@ -1,8 +1,10 @@
 import {
   alignTokens,
   bestMatch,
+  glossVariants,
   normalizeForCompare,
   normalizedTokens,
+  similarity,
   spokenWordSimilarity,
   stripParentheticals,
   type AlignedToken,
@@ -13,7 +15,8 @@ import type { LearningSettings, Question, WordResult } from '../../../shared/typ
 // Evaluation is deliberately forgiving: synonyms, homographs, every word an
 // image stands for, missing accents, small typos and near-miss sentences.
 
-export type Quality = 'exact' | 'accent' | 'typo' | 'synonym' | 'close' | 'wrong';
+// 'yours': accepted by the learner after it was marked wrong.
+export type Quality = 'exact' | 'accent' | 'typo' | 'synonym' | 'close' | 'yours' | 'wrong';
 
 export interface Outcome {
   correct: boolean;
@@ -94,6 +97,28 @@ function countedScore(alignment: AlignedToken[], counts: boolean[]): number {
   return size === 0 ? 1 : (2 * total) / size;
 }
 
+// Words that only make a meaning grammatical ("to have", "a lot") are not
+// needed for it to be found.
+const FUNCTION_WORDS = new Set(['to', 'a', 'an', 'the']);
+
+// Is one of the meanings of a word in an English text (given as tokens)?
+// Each content word of the meaning must appear, allowing small typos.
+export function meaningIn(meanings: string[], tokens: string[], closeSimilarity: number): boolean {
+  return meanings.some((meaning) =>
+    glossVariants(meaning).some((variant) => {
+      const words = variant.split(' ').filter(Boolean);
+      const content = words.filter((word) => !FUNCTION_WORDS.has(word));
+      const wanted = content.length ? content : words;
+      return (
+        wanted.length > 0 &&
+        wanted.every((word) =>
+          tokens.some((token) => token === word || (Math.min(token.length, word.length) >= 4 && similarity(token, word) >= closeSimilarity))
+        )
+      );
+    })
+  );
+}
+
 function sentenceOutcome(
   question: Question,
   response: string,
@@ -143,7 +168,21 @@ function sentenceOutcome(
       results.push({ wordId, phase: question.phase, correct: true });
     }
   } else {
-    results.push({ wordId: question.targetWordId, phase: question.phase, correct: false });
+    // Each word whose meaning is in the answer earns its point. A word whose
+    // meaning is in the translation but not in the answer is wrong; when the
+    // translation says it differently, only the word asked about counts.
+    const translation = normalizedTokens(stripParentheticals(reference), 'en');
+    const meanings = new Map<number, string[]>();
+    for (const token of sentence.tokens) {
+      if (token.evaluate && token.wordId !== null) meanings.set(token.wordId, token.english ?? []);
+    }
+    if (!meanings.has(question.targetWordId)) meanings.set(question.targetWordId, []);
+    for (const [wordId, english] of meanings) {
+      if (meaningIn(english, actual, closeSimilarity)) results.push({ wordId, phase: question.phase, correct: true });
+      else if (wordId === question.targetWordId || meaningIn(english, translation, closeSimilarity)) {
+        results.push({ wordId, phase: question.phase, correct: false });
+      }
+    }
   }
   return {
     correct,
@@ -207,6 +246,11 @@ export function acceptedByJudge(question: Question, outcome: Outcome, feedback: 
   return { ...outcome, correct: true, quality: 'close', note: feedback, results: [...results.values()] };
 }
 
+// The learner says the answer fits the sentence: every scored word counts as right.
+export function acceptedByYou(question: Question, outcome: Outcome): Outcome {
+  return { ...acceptedByJudge(question, outcome, ''), quality: 'yours', note: outcome.note };
+}
+
 export function qualityLabel(outcome: Outcome): string {
   switch (outcome.quality) {
     case 'exact':
@@ -219,6 +263,8 @@ export function qualityLabel(outcome: Outcome): string {
       return 'Also correct';
     case 'close':
       return outcome.score !== undefined ? `Close enough (${Math.round(outcome.score * 100)}%)` : 'Close enough';
+    case 'yours':
+      return 'Counted as right (your call)';
     default:
       return outcome.score !== undefined ? `Not quite (${Math.round(outcome.score * 100)}%)` : 'Not quite';
   }

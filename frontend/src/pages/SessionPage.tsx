@@ -6,6 +6,7 @@ import { api } from '../api';
 import { formatRelative } from '../lib/hooks';
 import MinigameRunner from '../components/minigame/MinigameRunner';
 import LevelDots from '../components/LevelDots';
+import BatchWords from '../components/BatchWords';
 import Pomodoro from '../components/Pomodoro';
 import { PHASES, PHASE_LABELS } from '../../../shared/games';
 import { BLOCK_BATCHES } from '../../../shared/scoring';
@@ -99,15 +100,18 @@ function MissingDefinitions({
 export function SessionHeader({
   state,
   blockBatches = BLOCK_BATCHES,
+  reviewing,
 }: {
   state: Pick<SessionState, 'mode' | 'block' | 'batch' | 'phase'>;
   blockBatches?: number;
+  // Reviews of words cover every due word at once: how many there are.
+  reviewing?: number;
 }) {
   if (!state.phase) return null;
   return (
     <div className="session-header">
       {state.mode === 'review' ? (
-        <span className="pill">Review</span>
+        <span className="pill">Review{reviewing ? ` · ${reviewing} word${reviewing === 1 ? '' : 's'}` : ''}</span>
       ) : (
         <>
           <span className="pill">Block {state.block}</span>
@@ -214,16 +218,16 @@ export default function SessionPage() {
           </Link>
         </div>
       </header>
-      {state && <SessionHeader state={state} />}
-      {state && state.batchWords.length > 0 && (
-        <div className="batch-words">
+      {state && <SessionHeader state={state} reviewing={state.mode === 'review' ? state.batchWords.length : undefined} />}
+      {state && (
+        <BatchWords count={state.batchWords.length}>
           {state.batchWords.map((word) => (
             <span key={word.id} className={`batch-word ${word.ready ? '' : 'not-ready'}`} title={word.english.join('; ')}>
               {word.display}
               <LevelDots levels={word.levels} />
             </span>
           ))}
-        </div>
+        </BatchWords>
       )}
       <MinigameRunner
         language={language}
